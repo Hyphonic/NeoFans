@@ -1,12 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from rich.console import Console
-from datetime import datetime
 from rich.table import Table
 from typing import Dict
 from rich import box
 import urllib.parse
 import threading
 import requests
+import datetime
 import aiofiles
 import aiohttp
 import asyncio
@@ -25,10 +25,10 @@ from rich.progress import (
     MofNCompleteColumn,
 )
 
-LogLevel = 0 # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
+LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
 class RichLogger:
-    def __init__(self, name=__name__):
+    def __init__(self, Name=__name__):
         self.Console = Console(
             markup=True,
             log_time=False,
@@ -45,25 +45,25 @@ class RichLogger:
         'CRITICAL': 5
     }
 
-    def debug(self, message):
-        if LogLevel <= self.LogLevels['DEBUG']:
-            self.Console.log(f"[bold blue]DEBUG:   [/bold blue] {message}")
+    def Debug(self, Message):
+        if LOG_LEVEL <= self.LogLevels['DEBUG']:
+            self.Console.log(f"[bold blue]DEBUG:   [/bold blue] {Message}")
 
-    def info(self, message):
-        if LogLevel <= self.LogLevels['INFO']:
-            self.Console.log(f"[bold green]INFO:    [/bold green] {message}")
+    def Info(self, Message):
+        if LOG_LEVEL <= self.LogLevels['INFO']:
+            self.Console.log(f"[bold green]INFO:    [/bold green] {Message}")
 
-    def warning(self, message):
-        if LogLevel <= self.LogLevels['WARNING']:
-            self.Console.log(f"[bold yellow]WARNING: [/bold yellow] {message}")
+    def Warning(self, Message):
+        if LOG_LEVEL <= self.LogLevels['WARNING']:
+            self.Console.log(f"[bold yellow]WARNING: [/bold yellow] {Message}")
 
-    def error(self, message):
-        if LogLevel <= self.LogLevels['ERROR']:
-            self.Console.log(f"[bold red]ERROR:   [/bold red] {message}")
+    def Error(self, Message):
+        if LOG_LEVEL <= self.LogLevels['ERROR']:
+            self.Console.log(f"[bold red]ERROR:   [/bold red] {Message}")
 
-    def critical(self, message):
-        if LogLevel <= self.LogLevels['CRITICAL']:
-            self.Console.log(f"[bold magenta]CRITICAL:[/bold magenta] {message}")
+    def Critical(self, Message):
+        if LOG_LEVEL <= self.LogLevels['CRITICAL']:
+            self.Console.log(f"[bold magenta]CRITICAL:[/bold magenta] {Message}")
 
 Logger = RichLogger(__name__)
 
@@ -249,7 +249,7 @@ Config = {
     'threads': {
         'max_workers': 32
     },
-    'enabled_platforms': { # Override creator_limit to 0 if platform not in enabled_platforms
+    'enabled_platforms': {  # Override creator_limit to 0 if platform not in enabled_platforms
         'rule34': True,
         'onlyfans': True,
         'fansly': True,
@@ -266,7 +266,7 @@ Config = {
 }
 
 class FavoriteFetcher:
-    def __init__(self, platform):
+    def __init__(self, Platform):
         try:
             # Load last fetch dates from json
             with open('last_fetches.json', 'r') as f:
@@ -281,7 +281,7 @@ class FavoriteFetcher:
         except (FileNotFoundError, json.JSONDecodeError):
             self.CachedHashes = {}
 
-        Url = f'https://{platform}.su/api/v1/account/favorites?type=artist'
+        Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
         Session = requests.Session()
         Session.headers.update({
             'accept': 'application/json',
@@ -292,8 +292,8 @@ class FavoriteFetcher:
 
         Session.cookies.set(
             'session',
-            os.getenv('COOMER_SESS') if platform == 'coomer' else os.getenv('KEMONO_SESS'),
-            domain=f'{platform}.su',
+            os.getenv('COOMER_SESS') if Platform == 'coomer' else os.getenv('KEMONO_SESS'),
+            domain=f'{Platform}.su',
             path='/'
         )
 
@@ -411,6 +411,7 @@ class DownloadManager:
         self.CachedHashes = {}
         self.NewHashes = {}
         self.LoadCachedHashes()
+        self.ProcessedHashes = set()  # Track processed hashes to prevent duplicates
         
     def LoadCachedHashes(self):
         """Load previously downloaded file hashes per platform and creator"""
@@ -418,9 +419,9 @@ class DownloadManager:
             with open('cached_hashes.json', 'r') as f:
                 self.CachedHashes = json.load(f)
             Config['cached_hashes'] = self.CachedHashes  # Update Config
-            Logger.debug(f"Loaded cached hashes for {len(self.CachedHashes)} platforms")
+            Logger.Debug(f"Loaded cached hashes for {len(self.CachedHashes)} platforms")
         except (FileNotFoundError, json.JSONDecodeError):
-            Logger.debug("No cached hashes found, starting fresh")
+            Logger.Debug("No cached hashes found, starting fresh")
             self.CachedHashes = {}
             Config['cached_hashes'] = self.CachedHashes  # Initialize in Config
             
@@ -447,13 +448,13 @@ class DownloadManager:
                     json.dump(self.CachedHashes, f, indent=4)
                 
                 TotalHashes = sum(
-                    len(hashes) 
-                    for platform in self.NewHashes 
-                    for creator, hashes in self.NewHashes[platform].items()
+                    len(Hashes) 
+                    for Platform in self.NewHashes 
+                    for Creator, Hashes in self.NewHashes[Platform].items()
                 )
-                Logger.debug(f"Saved {TotalHashes} new hashes to cache")
-            except Exception as E:
-                Logger.error(f"Failed to save hashes: {E}")
+                Logger.Debug(f"Saved {TotalHashes} new hashes to cache")
+            except Exception as e:
+                Logger.Error(f"Failed to save hashes: {e}")
         
     def PrintSummary(self):
         """Print formatted summary table of the download operation"""
@@ -520,85 +521,81 @@ class DownloadManager:
                     speed="0 B/s"
                 )
                 
-                def ProcessFile(FileData, platform, creator):
+                def ProcessFile(FileData, Platform, Creator):
                     try:
                         FileHash, FileUrl, FilePath = FileData
-                        file_extension = FileUrl.split('.')[-1]
-                        file_size = self.GetFileSize(FileUrl)  # Assume a method to get file size
-                        ProgressBar.update(MainTask, current_file="Downloading...", file_hash=FileHash[:10],
-                                          file_type=file_extension, file_size=self.HumanizeBytes(file_size))
-                        # Check if hash already exists
-                        if (platform in self.CachedHashes and 
-                            creator in self.CachedHashes[platform] and 
-                            FileHash in self.CachedHashes[platform][creator]):
+                        
+                        # Skip if we've already processed this hash
+                        if FileHash in self.ProcessedHashes:
                             with self.StatsLock:
                                 self.Stats['SkippedFiles'] = self.Stats.get('SkippedFiles', 0) + 1
                                 self.ProcessedFiles += 1
-                                return True
+                            return True
                         
-                        FileStartTime = time.time()
-                        Session = requests.Session()
-
-                        if self.DryRun:
-                            Response = Session.head(FileUrl)
-                            FileSize = int(Response.headers.get('content-length', 1024*1024))
-                            time.sleep(0.5)  # Simulate download time
-                            Speed = FileSize / 0.5  # Simulate speed
+                        # Get actual file size before downloading
+                        Response = requests.head(FileUrl, allow_redirects=True)
+                        if Response.status_code == 200:
+                            FileSize = int(Response.headers.get('content-length', 0))
+                            FileExtension = os.path.splitext(FileUrl)[1]
                             
-                            with self.StatsLock:
-                                self.ProcessedFiles += 1
-                                self.Stats['TotalDownloaded'] += FileSize
-                                self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
-                                ProgressBar.update(
-                                    MainTask,
-                                    current_file=FileHash[:20] + "...",
-                                    speed=f"{self.HumanizeBytes(Speed)}/s",
-                                    advance=1
-                                )
-                                ProgressBar.refresh()
-                                    
-                        else:
-                            Response = Session.get(FileUrl, stream=True)
+                            # Update file path to use hash as filename
+                            FilePath = os.path.join(os.path.dirname(FilePath), f"{FileHash}{FileExtension}")
+                            
+                            ProgressBar.update(MainTask, 
+                                current_file="Downloading...", 
+                                file_hash=FileHash[:20],
+                                file_type=FileExtension,
+                                file_size=self.HumanizeBytes(FileSize))
+
+                            if self.DryRun:
+                                # ...existing dry run code...
+                                self.ProcessedHashes.add(FileHash)
+                                return True
+
+                            # Real download
+                            Response = requests.get(FileUrl, stream=True)
                             if Response.status_code == 200:
                                 os.makedirs(os.path.dirname(FilePath), exist_ok=True)
                                 Downloaded = 0
+                                FileStartTime = time.time()
+                                
                                 with open(FilePath, 'wb') as f:
                                     for Chunk in Response.iter_content(chunk_size=1024*1024):
                                         if Chunk:
                                             f.write(Chunk)
                                             Downloaded += len(Chunk)
+                                            ElapsedTime = time.time() - FileStartTime
+                                            Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
                                             
-                                # Calculate final speed after complete download
-                                Speed = Downloaded / (time.time() - FileStartTime)
+                                            with self.StatsLock:
+                                                ProgressBar.update(
+                                                    MainTask,
+                                                    current_file=FileHash[:20],
+                                                    speed=f"{self.HumanizeBytes(Speed)}/s"
+                                                )
+                                                ProgressBar.refresh()
+
+                                self.ProcessedHashes.add(FileHash)
                                 
                                 with self.StatsLock:
                                     self.ProcessedFiles += 1
                                     self.Stats['TotalDownloaded'] += Downloaded
                                     self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
-                                    ProgressBar.update(
-                                        MainTask,
-                                        current_file=FileHash[:20] + "...",
-                                        speed=f"{self.HumanizeBytes(Speed)}/s",
-                                        advance=1
-                                    )
+                                    ProgressBar.update(MainTask, advance=1)
                                     ProgressBar.refresh()
-                            
-                        # Add successful download hash to cache
-                        if platform not in self.NewHashes:
-                            self.NewHashes[platform] = {}
-                        if creator not in self.NewHashes[platform]:
-                            self.NewHashes[platform][creator] = []
-                        self.NewHashes[platform][creator].append(FileHash)
-                        
-                        return True
-                        
-                    except Exception:
+                                    
+                                return True
+                                
+                        return False
+
+                    except Exception as e:
+                        Logger.Error(f"Download error for {FileHash}: {str(e)}")
                         with self.StatsLock:
                             self.Stats['FailedFiles'] += 1
                         return False
 
                 with ThreadPoolExecutor(max_workers=self.MaxWorkers) as Executor:
-                    Futures = [Executor.submit(ProcessFile, FileData, platform, creator) for FileData, platform, creator in self.FileList]
+                    Futures = [Executor.submit(ProcessFile, FileData, Platform, Creator) for FileData, Platform, Creator in self.FileList]
                     for Future in as_completed(Futures):
                         if self.StopDownloads:
                             break
@@ -608,26 +605,26 @@ class DownloadManager:
             self.PrintSummary()  # Print summary table after completion
             return True
 
-        except Exception as E:
-            Logger.error(f"Error in download process: {E}")
+        except Exception as e:
+            Logger.Error(f"Error in download process: {e}")
             return False
 
     @staticmethod
-    def HumanizeBytes(bytes):
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if bytes < 1024:
-                return f"{bytes:.2f} {unit}"
-            bytes /= 1024
+    def HumanizeBytes(Bytes):
+        for Unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if Bytes < 1024:
+                return f"{Bytes:.2f} {Unit}"
+            Bytes /= 1024
 
     @staticmethod
-    def HumanizeTime(seconds):
-        return str(datetime.timedelta(seconds=seconds))
+    def HumanizeTime(Seconds):
+        return str(datetime.timedelta(seconds=Seconds))
     
-    def GetFileSize(self, url):
+    def GetFileSize(self, Url):
         # Method to get the size of the file from the URL
-        response = requests.head(url)
-        if 'Content-Length' in response.headers:
-            return int(response.headers['Content-Length'])
+        Response = requests.head(Url)
+        if 'Content-Length' in Response.headers:
+            return int(Response.headers['Content-Length'])
         return 0
 
     # Remove the ExtractPathInfo method
@@ -661,7 +658,7 @@ class Fetcher:
         except Exception:
             pass
 
-        #Logger.debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
+        #Logger.Debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
 
         self.Platform = Platform
         self.Id = Id
@@ -699,19 +696,19 @@ class Fetcher:
             }
 
         self.ParamsLimit = self.Params['limit'] if self.Params else 0
-        self.Params = urllib.parse.urlencode(self.Params, safe='+') if self.Platform in ['rule34', 'e621'] else self.Params # Avoid '+' encoding in params
+        self.Params = urllib.parse.urlencode(self.Params, safe='+') if self.Platform in ['rule34', 'e621'] else self.Params  # Avoid '+' encoding in params
         self.DryRun = Config.get('dry_run', False)
 
-    def ExtractHash(self, url): # Extract hash from URL / <hash> .png
-        if not url:
+    def ExtractHash(self, Url):  # Extract hash from URL / <hash> .png
+        if not Url:
             return None
         # Extract the filename from the URL and split on last dot
-        Filename = url.split('/')[-1]
+        Filename = Url.split('/')[-1]
         return Filename.rsplit('.', 1)[0]
 
-    def FetchUrl(self, url: str, params: Dict = None) -> Dict:
+    def FetchUrl(self, Url: str, Params: Dict = None) -> Dict:
         try:
-            Response  = self.Session.get(url, params=params)
+            Response = self.Session.get(Url, params=Params)
             if Response.status_code == 200:
                 return Response.json(), Response.status_code
             return None, Response.status_code
@@ -722,11 +719,11 @@ class Fetcher:
         # Decode HTML entities using html library
         Content = html.unescape(Content)
         # Regex to find URLs
-        UrlPattern, = re.compile(r'https?://[^\s<]+')
+        UrlPattern = re.compile(r'https?://[^\s<]+')
         Urls = UrlPattern.findall(Content)
-        Logger.debug(f'Found {len(Urls)} URLs')
+        Logger.Debug(f'Found {len(Urls)} URLs')
         for Url in Urls:
-            Logger.debug(f'∙ {Url}')
+            Logger.Debug(f'∙ {Url}')
         return Urls
 
     def Scrape(self):
@@ -760,7 +757,7 @@ class Fetcher:
                                     continue
 
                                 if FileHash:
-                                    #Logger.debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
+                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -769,20 +766,20 @@ class Fetcher:
                                     _ += 1
                         
                         if _ < self.ParamsLimit:
-                            #Logger.info(f'Page {self.Page+1} → {_} files')
+                            #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
-                        #Logger.info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
                         if StatusCode != 200:
-                            #Logger.error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
-                            #Logger.error(f'Params: {ReEncodedParams}')
-                            #Logger.error(f'URL: {Response.url}')
+                            #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
+                            #Logger.Error(f'Params: {ReEncodedParams}')
+                            #Logger.Error(f'URL: {Response.url}')
                             break
                         else:
-                            #Logger.error(f'No data at page {self.Page+1}')
+                            #Logger.Error(f'No data at page {self.Page+1}')
                             break
                 except Exception:
-                    #Logger.error(f'Error processing page {self.Page+1}: {e}')
+                    #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
                 self.Page += 1
@@ -818,7 +815,7 @@ class Fetcher:
                                     continue
 
                                 if FileHash:
-                                    #Logger.debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
+                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -827,16 +824,16 @@ class Fetcher:
                                     _ += 1
 
                         if _ < self.ParamsLimit:
-                            #Logger.info(f'Page {self.Page+1} → {_} files')
+                            #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
 
-                        #Logger.info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
-                        #Logger.error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
+                        #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
                         break
                         
                 except Exception:
-                    #Logger.error(f'Error processing page {self.Page+1}: {e}')
+                    #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
                 self.Page += 1
@@ -866,7 +863,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and FileHash not in self.CachedHashes:
-                                    #Logger.debug(f'∙ Found New File {FileHash[:40]}⋯')
+                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -881,7 +878,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and FileHash not in self.CachedHashes:
-                                    #Logger.debug(f'∙ Found New File {FileHash[:40]}⋯')
+                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -889,28 +886,28 @@ class Fetcher:
                                     self.FilesDownloaded += 1
                                     _ += 1
 
-                    #Logger.info(f'Found {_} files')
+                    #Logger.Info(f'Found {_} files')
 
                 else:
-                    #Logger.error(f'No response or bad status ({StatusCode})')
+                    #Logger.Error(f'No response or bad status ({StatusCode})')
                     pass
                     
             except Exception:
-                #Logger.error(f'Error processing page: {e}')
+                #Logger.Error(f'Error processing page: {e}')
                 pass
 
         if self.GlobalLimit <= 0:
-            #Logger.info('Global limit reached')
+            #Logger.Info('Global limit reached')
             pass
         if self.CreatorLimit <= 0:
-            #Logger.info(f'Creator limit reached for {self.Name}')
+            #Logger.Info(f'Creator limit reached for {self.Name}')
             pass
 
         self.Session.close()
         return self.GlobalLimit, self.Result
     
 def CheckForDuplicateIds():
-    Logger.info("Checking For Duplicate IDs...")
+    Logger.Info("Checking For Duplicate IDs...")
     
     def FindDuplicates(Items):
         Seen = {}
@@ -926,9 +923,9 @@ def CheckForDuplicateIds():
     for Platform in Config['directory_names'].keys():
         Duplicates = FindDuplicates(Config[Platform]['ids'])
         if Duplicates:
-            Logger.warning(f"[{Config['platform_names'][Platform]}] Found {len(Duplicates)} duplicate IDs:")
+            Logger.Warning(f"[{Config['platform_names'][Platform]}] Found {len(Duplicates)} duplicate IDs:")
             for Duplicate in Duplicates:
-                Logger.warning(f"∙ {Duplicate}")
+                Logger.Warning(f"∙ {Duplicate}")
 
 Screen = r'''
 
@@ -959,12 +956,12 @@ def Main():
         CheckForDuplicateIds()
 
         # Set creator_limit to 0 if platform not in enabled_platforms
-        for platform in Config['directory_names'].keys():
-            if not Config['enabled_platforms'][platform]:
-                Config[platform]['creator_limit'] = 0
+        for Platform in Config['directory_names'].keys():
+            if not Config['enabled_platforms'][Platform]:
+                Config[Platform]['creator_limit'] = 0
 
-        FavoriteFetcher('coomer') # Fetch favorites from Coomer
-        FavoriteFetcher('kemono') # Fetch favorites from Kemono
+        FavoriteFetcher('coomer')  # Fetch favorites from Coomer
+        FavoriteFetcher('kemono')  # Fetch favorites from Kemono
 
         # Ensure Config['cached_hashes'] is available
         Config['cached_hashes'] = DownloadManager([], None).CachedHashes
@@ -972,21 +969,21 @@ def Main():
         for Platform in Config['directory_names'].keys():
             if Platform in ['rule34', 'e621']:
                 for Creator in Config[Platform]['ids']:
-                    Config[Platform]['directory_names'].append(f'{Config['directory_names'][Platform]}/{Creator.capitalize()}')
+                    Config[Platform]['directory_names'].append(f'{Config["directory_names"][Platform]}/{Creator.capitalize()}')
                     Config[Platform]['names'].append(Creator.capitalize())
             else:
                 for Creator in Config[Platform]['names']:
-                    Config[Platform]['directory_names'].append(f'{Config['directory_names'][Platform]}/{Creator.capitalize()}')
+                    Config[Platform]['directory_names'].append(f'{Config["directory_names"][Platform]}/{Creator.capitalize()}')
         
         with open('config.json', 'w', encoding='utf-8') as ConfigFile:
             json.dump(Config, ConfigFile, indent=4, ensure_ascii=False)
-            Logger.debug('Generated config.json')
+            Logger.Debug('Generated config.json')
 
         for Platform in Config['directory_names'].keys():
-            Logger.debug(f'∙ Loaded {len(Config[Platform]["ids"])} {Config["platform_names"][Platform]} creators')
-        Logger.info(f'Loaded {sum([len(Config[platform]["ids"]) for platform in Config["directory_names"].keys() if Config[platform]["creator_limit"] > 0])} creators')
+            Logger.Debug(f'∙ Loaded {len(Config[Platform]["ids"])} {Config["platform_names"][Platform]} creators')
+        Logger.Info(f'Loaded {sum([len(Config[Platform]["ids"]) for Platform in Config["directory_names"].keys() if Config[Platform]["creator_limit"] > 0])} creators')
 
-        Logger.debug('∙ Starting in dry-run mode') if Config.get('dry_run', False) else None
+        Logger.Debug('∙ Starting in dry-run mode') if Config.get('dry_run', False) else None
 
         # Create progress for each enabled platform
         ProgressColumns = [
@@ -1037,7 +1034,7 @@ def Main():
                     ))
 
                     for Data in Tuple:
-                        ID, Name, DirectoryName = Data
+                        Id, Name, DirectoryName = Data
                         # Update task fields instead of logging
                         ProgressBar.update(
                             Task,
@@ -1048,13 +1045,13 @@ def Main():
                         )
                         
                         Config['global_limit'], Result = Fetcher(
-                            Platform=Platform,
-                            Id=ID,
-                            Name=Name,
-                            DirectoryName=DirectoryName,
-                            CachedHashes=Config['cached_hashes'],
-                            CreatorLimit=Config[Platform]['creator_limit'],
-                            GlobalLimit=Config['global_limit']
+                            platform=Platform,
+                            id=Id,
+                            name=Name,
+                            directoryName=DirectoryName,
+                            cachedHashes=Config['cached_hashes'],
+                            creatorLimit=Config[Platform]['creator_limit'],
+                            globalLimit=Config['global_limit']
                         ).Scrape()
                         Collection.append(Result)
                         ProgressBar.refresh()
@@ -1071,9 +1068,9 @@ def Main():
                 DownloadManager(AllFiles, None).Download()
 
     except KeyboardInterrupt:
-        Logger.warning("Interrupted by user")
-    except Exception as E:
-        Logger.error(f"Error: {E}")
+        Logger.Warning("Interrupted by user")
+    except Exception as e:
+        Logger.Error(f"Error: {e}")
 
 if __name__ == '__main__':
     Main()
