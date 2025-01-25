@@ -52,8 +52,8 @@ jobs:
           COLUMNS: 120
           E621_LOGIN: ${{ secrets.E621_LOGIN }}
           E621_API_KEY: ${{ secrets.E621_API_KEY }}
-          KEMONO_SESSION: ${{ secrets.KEMONO_SESSION }}
-          COOMER_SESSION: ${{ secrets.COOMER_SESSION }}
+          KEMONO_SESS: ${{ secrets.KEMONO_SESS }}
+          COOMER_SESS: ${{ secrets.COOMER_SESS }}
         run: |
           python Main.py
       
