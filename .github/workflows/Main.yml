@@ -1,0 +1,86 @@
+name: Download Posts
+
+on:
+  workflow_dispatch:
+
+#concurrency:
+#  group: download-posts
+
+jobs:
+  download-content:
+    name: 🌐 Download Content
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🗑️ Cleanup Workflow Runs
+        uses: iamludal/action-purge-workflow-runs@v2
+        with:
+          days-old: 1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: 💾 Free Disk Space
+      #   uses: jlumbroso/free-disk-space@main
+      #   with:
+      #     tool-cache: true
+
+      - name: 📥 Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📦 Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      
+      - name: 📦 Install Dependencies
+        run: pip install -r requirements.txt
+
+      # - name: 🔧 Install Rclone
+      #   uses: AnimMouse/setup-rclone@v1
+      #   with:
+      #     rclone_config: ${{ secrets.PIXELDRAIN_CONF }}
+      #     disable_base64: true
+
+      - name: 🔑 Generate Proxies
+        run: |
+          python ProxyChecker.py
+
+      - name: ⏬ Download All Content
+        env:
+          COLUMNS: 120
+          E621_LOGIN: ${{ secrets.E621_LOGIN }}
+          E621_API_KEY: ${{ secrets.E621_API_KEY }}
+          KEMONO_SESSION: ${{ secrets.KEMONO_SESSION }}
+          COOMER_SESSION: ${{ secrets.COOMER_SESSION }}
+        run: |
+          python Main.py
+      
+      - name: 📃 List Files
+        run: |
+          ls -lh
+          tree -L 2 -CF
+
+      - name: 🔼 Commit updated hashes
+        if: success()
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git pull
+          git add cached_hashes.json
+          git commit -m "Update cached hashes"
+          git push
+
+      # - name: 🔁 Trigger Next Workflow
+      #   if: success()
+      #   run: |
+      #     gh workflow run "Download Posts" --ref main
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # - name: 🌐 Upload Data with Rclone
+      #   run: |
+      #     echo "🟢 Uploading Data to Pixeldrain..."
+      #     rclone copy . Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
+      #     echo "🟢 Upload complete."
