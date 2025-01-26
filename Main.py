@@ -326,6 +326,26 @@ class FavoriteFetcher:
 #                                                          #
 ############################################################
 
+async def LoadCache():
+    """Load cached hashes asynchronously"""
+    try:
+        async with aiofiles.open('cached_hashes.json', 'r') as f:
+            Content = await f.read()
+            Config['cached_hashes'] = json.loads(Content)
+            TotalHashes = sum(len(Hashes) for Platform in Config['cached_hashes'].values() 
+                               for Hashes in Platform.values())
+            Logger.Debug(f"∙ Loaded {TotalHashes} cached hashes")
+    except (FileNotFoundError, json.JSONDecodeError):
+        Config['cached_hashes'] = {}
+        Logger.Debug("∙ No existing cache found, starting fresh")
+
+async def CheckDiskSpace(RequiredBytes: int = 5e+9) -> bool:
+    """Check if sufficient disk space is available"""
+    if shutil.disk_usage('/').free < RequiredBytes:
+        Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
+        return False
+    return True
+
 @dataclass
 class DownloadItem:
     """Represents a single file to be downloaded"""
@@ -407,68 +427,76 @@ class AsyncDownloadManager:
             return False
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-    async def DownloadFile(self, Item: DownloadItem, progress, task_id) -> bool:
+    async def DownloadFile(self, Item: DownloadItem, progress, TaskId) -> bool:
         try:
             async with self.Semaphore:
-                if Item.FileHash in self.ProcessedHashes:
-                    return True
+                if not await CheckDiskSpace():
+                    raise SystemExit("Download stopped: insufficient disk space")
 
-                # Get file size first
-                async with self.Session.head(Item.FileUrl, allow_redirects=True) as Response:
-                    if Response.status != 200:
-                        raise Exception(f"Failed to get file size: {Response.status}")
-                    FileSize = int(Response.headers.get('content-length', 0))
-                    Item.FileSize = FileSize
+                try:
+                    # Get file size first
+                    async with self.Session.head(Item.FileUrl, allow_redirects=True) as Response:
+                        if Response.status != 200:
+                            Logger.Warning(f"Failed to get size for {Item.FileHash}: {Response.status}")
+                            return False
+                        FileSize = int(Response.headers.get('content-length', 0))
+                        Item.FileSize = FileSize
 
-                if self.DryRun:
-                    await asyncio.sleep(0.1)
-                    async with self.Lock:
-                        self.CompletedFiles += 1
-                        self.ProcessedHashes.add(Item.FileHash)
-                        progress.update(task_id, completed=self.CompletedFiles, 
-                                     file=f"{Item.FileHash[:20]}...", 
-                                     size=self.HumanizeBytes(FileSize))
-                        progress.refresh()  # Add refresh here for dry run
-                    return True
-
-                # Real download
-                TempPath = f"{Item.SavePath}.downloading"
-                async with self.Session.get(Item.FileUrl) as Response:
-                    if Response.status == 200:
-                        os.makedirs(os.path.dirname(Item.SavePath), exist_ok=True)
-                        
-                        async with aiofiles.open(TempPath, 'wb') as f:
-                            Downloaded = 0
-                            async for Chunk in Response.content.iter_chunked(1024*1024):
-                                if Chunk:
-                                    await f.write(Chunk)
-                                    Downloaded += len(Chunk)
-                                    async with self.Lock:
-                                        progress.update(task_id, 
-                                                      file=f"{Item.FileHash[:20]}...",
-                                                      size=self.HumanizeBytes(Downloaded))
-                            progress.console.print('Caution, storage space is running out.') if shutil.disk_usage('/').free < 5e+9 else None # 5GB left
-                            progress.refresh()  # Add refresh here for chunk updates
-
-                        # Rename from .downloading to final name
-                        os.rename(TempPath, Item.SavePath)
-                        
-                        # Track hash for caching
+                    if self.DryRun:
+                        await asyncio.sleep(0.1)
                         async with self.Lock:
-                            if Item.Platform not in self.NewHashes:
-                                self.NewHashes[Item.Platform] = {}
-                            if Item.Creator not in self.NewHashes[Item.Platform]:
-                                self.NewHashes[Item.Platform][Item.Creator] = []
-                            self.NewHashes[Item.Platform][Item.Creator].append(Item.FileHash)
-                            
                             self.CompletedFiles += 1
                             self.ProcessedHashes.add(Item.FileHash)
-                            self.TotalBytes += Downloaded
-                            progress.update(task_id, completed=self.CompletedFiles)
-
+                            progress.update(TaskId, completed=self.CompletedFiles, 
+                                            file=f"{Item.FileHash[:20]}...", 
+                                            size=self.HumanizeBytes(FileSize))
+                            progress.refresh()  # Add refresh here for dry run
                         return True
 
-                return False
+                    # Real download
+                    TempPath = f"{Item.SavePath}.downloading"
+                    async with self.Session.get(Item.FileUrl) as Response:
+                        if Response.status == 200:
+                            os.makedirs(os.path.dirname(Item.SavePath), exist_ok=True)
+                            
+                            async with aiofiles.open(TempPath, 'wb') as f:
+                                Downloaded = 0
+                                async for Chunk in Response.content.iter_chunked(1024*1024):
+                                    if Chunk:
+                                        await f.write(Chunk)
+                                        Downloaded += len(Chunk)
+                                        async with self.Lock:
+                                            progress.update(TaskId, 
+                                                            file=f"{Item.FileHash[:20]}...",
+                                                            size=self.HumanizeBytes(Downloaded))
+                                progress.console.print('Caution, storage space is running out.') if shutil.disk_usage('/').free < 5e+9 else None # 5GB left
+                                progress.refresh()  # Add refresh here for chunk updates
+
+                            # Rename from .downloading to final name
+                            os.rename(TempPath, Item.SavePath)
+                            
+                            # Track hash for caching
+                            async with self.Lock:
+                                if Item.Platform not in self.NewHashes:
+                                    self.NewHashes[Item.Platform] = {}
+                                if Item.Creator not in self.NewHashes[Item.Platform]:
+                                    self.NewHashes[Item.Platform][Item.Creator] = []
+                                self.NewHashes[Item.Platform][Item.Creator].append(Item.FileHash)
+                                
+                                self.CompletedFiles += 1
+                                self.ProcessedHashes.add(Item.FileHash)
+                                self.TotalBytes += Downloaded
+                                progress.update(TaskId, completed=self.CompletedFiles)
+
+                            return True
+
+                    return False
+
+                except SystemExit as Error:
+                    raise Error  # Re-raise disk space error
+                except Exception as Error:
+                    Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
+                    return False
 
         except Exception as Error:
             self.FailedFiles += 1
@@ -823,6 +851,9 @@ Screen = r'''
 def Main():
     Console(force_terminal=True).print(Screen)
     try:
+        # Load cache first
+        asyncio.run(LoadCache())
+        
         InitialGlobalLimit = Config['global_limit']
 
         CheckForDuplicateIds()
