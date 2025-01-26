@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 import urllib.parse
 import requests
 import aiofiles
+import argparse
 import asyncio
 import aiohttp
 import backoff
@@ -24,6 +25,20 @@ from rich.progress import (
 )
 
 load_dotenv()
+
+Parser = argparse.ArgumentParser(
+    description="Fetch and download content from various platforms",
+    prog="NeoFetch",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter
+)
+
+Parser.add_argument(
+    "--dry-run",
+    help="Run without downloading any files",
+    default=False,
+    type=bool,
+    nargs='?',
+)
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -259,8 +274,8 @@ Config = {
         'fanbox': True,
         'gumroad': True
     },
-    'global_limit': 50,
-    'dry_run': False,
+    'global_limit': 5000,
+    'dry_run': Parser.parse_args().dry_run,
     'platform_limit_debug': 1,
     'cached_hashes': {}  # Initialize cached_hashes
 }
@@ -342,17 +357,17 @@ class AsyncDownloadManager:
             self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
             async with aiohttp.ClientSession() as Session:
                 self.Session = Session
+                
+                Logger.Info(f"∙ Downloading {self.TotalFiles} files...")
 
-                def get_platform_color(Platform):
-                # Use regex to extract first color tag
-                    PlatformText = Config['platform_names'][Platform]
-                    Color = re.search(r'\[([\w_]+)\]', PlatformText)
-                    return Color.group(1) if Color else 'white'
+                def GetPlatformColor(Platform):
+                    PlatformText = Config['platform_names'].get(Platform, '')
+                    ColorMatch = re.search(r'\[([a-z0-9_]+)\]', PlatformText.lower())
+                    return ColorMatch.group(1) if ColorMatch else 'white'
 
                 ProgressColumns = [
-                    # Show creator name in platform color
-                    TextColumn(lambda task: f"[{get_platform_color(task.fields['platform'])}]{task.fields['creator']}[/]"),
-                    BarColumn(bar_width=40),
+                    TextColumn("{task.fields[creator]}", style=f"bold {GetPlatformColor(self.Items[0].Platform)}"),
+                    BarColumn(bar_width=None),
                     TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                     TextColumn("•"),
                     TextColumn("[blue]{task.fields[file]}"),
@@ -363,7 +378,7 @@ class AsyncDownloadManager:
                     TimeRemainingColumn(),
                 ]
 
-                Progress_Bar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console)
+                Progress_Bar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console, expand=True)
                 
                 with Progress_Bar as progress:
                     task_id = progress.add_task(
@@ -406,7 +421,7 @@ class AsyncDownloadManager:
                     Item.FileSize = FileSize
 
                 if self.DryRun:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(0.1)
                     async with self.Lock:
                         self.CompletedFiles += 1
                         self.ProcessedHashes.add(Item.FileHash)
@@ -842,7 +857,7 @@ def Main():
         # Create progress for each enabled platform
         ProgressColumns = [
             TextColumn("[cyan]{task.fields[platform]}"),
-            BarColumn(bar_width=40),
+            BarColumn(bar_width=None),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TextColumn("•"),
             TextColumn("[blue]{task.fields[creator]}"),
@@ -861,8 +876,10 @@ def Main():
                     Config[Platform]['ids'] = Config[Platform]['ids'][:Config['platform_limit_debug']]
                     Config[Platform]['names'] = Config[Platform]['names'][:Config['platform_limit_debug']]
                     Config[Platform]['directory_names'] = Config[Platform]['directory_names'][:Config['platform_limit_debug']]
+            
+            Config[Platform]['names'] = [Name.capitalize() for Name in Config[Platform]['names']]
 
-        with Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False) as ProgressBar:
+        with Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False, expand=True) as ProgressBar:
             TotalCreators = sum([
                 len(Config[Platform]['ids']) 
                 for Platform in Config['directory_names'].keys() 
