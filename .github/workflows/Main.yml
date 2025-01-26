@@ -19,7 +19,7 @@ jobs:
           # Find and delete failed workflow runs
           gh run list --limit 100 --repo "$REPO" --json databaseId,conclusion | jq -c '.[] | select(.conclusion == "failure") | .databaseId' | while read -r run_id; do
             echo "Deleting failed workflow with ID $run_id"
-            gh run delete "$run_id" --repo "$REPO" --confirm
+            gh run delete "$run_id" --repo "$REPO"
           done
 
       # - name: 💾 Free Disk Space
