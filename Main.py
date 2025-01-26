@@ -1,25 +1,26 @@
-from rich.console import Console
+from dataclasses import dataclass
 from typing import Dict, Optional
+from rich.console import Console
 from dotenv import load_dotenv
 import urllib.parse
 import requests
+import aiofiles
+import asyncio
+import aiohttp
+import backoff
 import random
+import shutil
 import html
 import json
 import os
 import re
-from dataclasses import dataclass
-import backoff  # New dependency for retries
-import asyncio
-import aiohttp
-import aiofiles
 
 from rich.progress import (
-    Progress,
     BarColumn,
+    MofNCompleteColumn,
+    Progress,
     TextColumn,
     TimeRemainingColumn,
-    MofNCompleteColumn,
 )
 
 load_dotenv()
@@ -342,27 +343,31 @@ class AsyncDownloadManager:
             async with aiohttp.ClientSession() as Session:
                 self.Session = Session
 
+                def get_platform_color(Platform):
+                # Use regex to extract first color tag
+                    PlatformText = Config['platform_names'][Platform]
+                    Color = re.search(r'\[([\w_]+)\]', PlatformText)
+                    return Color.group(1) if Color else 'white'
+
                 ProgressColumns = [
-                    # Replace "Downloading" text with colored creator name
-                    TextColumn(lambda task: Config['platform_names'][task.fields['platform']].replace(
-                        ']', f"] {task.fields['creator']}" if 'creator' in task.fields else "]"
-                    )),
+                    # Show creator name in platform color
+                    TextColumn(lambda task: f"[{get_platform_color(task.fields['platform'])}]{task.fields['creator']}[/]"),
                     BarColumn(bar_width=40),
                     TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                     TextColumn("•"),
                     TextColumn("[blue]{task.fields[file]}"),
-                    TextColumn("•"),
+                    TextColumn("•"), 
                     TextColumn("{task.fields[size]}"),
                     TextColumn("•"),
                     MofNCompleteColumn(),
                     TimeRemainingColumn(),
                 ]
 
-                Progress_Bar = Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False)
+                Progress_Bar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console)
                 
                 with Progress_Bar as progress:
                     task_id = progress.add_task(
-                        "",  # Empty description since we use the platform name + creator
+                        "",
                         total=self.TotalFiles,
                         file="Starting...",
                         size="0 B",
@@ -427,6 +432,7 @@ class AsyncDownloadManager:
                                         progress.update(task_id, 
                                                       file=f"{Item.FileHash[:20]}...",
                                                       size=self.HumanizeBytes(Downloaded))
+                            progress.console.print('Caution, storage space is running out.') if shutil.disk_usage('/').free < 5e+9 else None # 5GB left
                             progress.refresh()  # Add refresh here for chunk updates
 
                         # Rename from .downloading to final name
