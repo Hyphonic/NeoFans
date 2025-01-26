@@ -12,11 +12,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 🗑️ Cleanup Workflow Runs
-        uses: iamludal/action-purge-workflow-runs@v2
-        with:
-          days-old: 1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Find and delete failed workflow runs
+          gh run list --limit 100 --repo "$REPO" --json databaseId,conclusion | jq -c '.[] | select(.conclusion == "failure") | .databaseId' | while read -r run_id; do
+            echo "Deleting failed workflow with ID $run_id"
+            gh run delete "$run_id" --repo "$REPO" --confirm
+          done
 
       # - name: 💾 Free Disk Space
       #   uses: jlumbroso/free-disk-space@main
