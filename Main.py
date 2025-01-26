@@ -343,7 +343,10 @@ class AsyncDownloadManager:
                 self.Session = Session
 
                 ProgressColumns = [
-                    TextColumn("[cyan]Downloading"),
+                    # Replace "Downloading" text with colored creator name
+                    TextColumn(lambda task: Config['platform_names'][task.fields['platform']].replace(
+                        ']', f"] {task.fields['creator']}" if 'creator' in task.fields else "]"
+                    )),
                     BarColumn(bar_width=40),
                     TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                     TextColumn("•"),
@@ -359,10 +362,12 @@ class AsyncDownloadManager:
                 
                 with Progress_Bar as progress:
                     task_id = progress.add_task(
-                        "Downloading",
+                        "",  # Empty description since we use the platform name + creator
                         total=self.TotalFiles,
                         file="Starting...",
-                        size="0 B"
+                        size="0 B",
+                        platform=self.Items[0].Platform if self.Items else "",
+                        creator=self.Items[0].Creator if self.Items else ""
                     )
 
                     # Create download tasks for all files
