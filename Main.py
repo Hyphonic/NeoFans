@@ -432,7 +432,7 @@ class AsyncDownloadManager:
         try:
             async with self.Semaphore:
                 if not await CheckDiskSpace():
-                    raise SystemExit("Download stopped: insufficient disk space")
+                    raise SystemExit(0)  # Exit with code 0 instead of an error
 
                 try:
                     # Get file size first
@@ -470,7 +470,6 @@ class AsyncDownloadManager:
                                             progress.update(TaskId, 
                                                             file=f"{Item.FileHash[:20]}...",
                                                             size=self.HumanizeBytes(Downloaded))
-                                progress.console.print('Caution, storage space is running out.') if shutil.disk_usage('/').free < 5e+9 else None # 5GB left
                                 progress.refresh()  # Add refresh here for chunk updates
 
                             # Rename from .downloading to final name
@@ -495,8 +494,8 @@ class AsyncDownloadManager:
 
                 except SystemExit as Error:
                     raise Error  # Re-raise disk space error
-                except Exception as Error:
-                    Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
+                except Exception: # as Error:
+                    #Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
                     return False
 
         except Exception as Error:
