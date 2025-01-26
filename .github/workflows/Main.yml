@@ -65,6 +65,7 @@ jobs:
         run: |
           ls -lh
           tree -L 2 -CF
+          cat cached_hashes.json
 
       - name: 🔼 Commit updated hashes
         if: success()
