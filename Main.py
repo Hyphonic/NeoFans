@@ -13,6 +13,7 @@ import random
 import shutil
 import html
 import json
+import sys
 import os
 import re
 
@@ -432,7 +433,7 @@ class AsyncDownloadManager:
         try:
             async with self.Semaphore:
                 if not await CheckDiskSpace():
-                    raise SystemExit(0)  # Exit with code 0 instead of an error
+                    sys.exit(0)
 
                 try:
                     # Get file size first
