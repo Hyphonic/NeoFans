@@ -1,22 +1,18 @@
-from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
-from rich.table import Table
-from typing import Dict
-from rich import box
+from typing import Dict, Optional
+from dotenv import load_dotenv
 import urllib.parse
-import threading
 import requests
-import datetime
-import aiofiles
-import aiohttp
-import asyncio
 import random
-import queue
-import time
 import html
 import json
 import os
 import re
+from dataclasses import dataclass
+import backoff  # New dependency for retries
+import asyncio
+import aiohttp
+import aiofiles
 
 from rich.progress import (
     Progress,
@@ -25,6 +21,8 @@ from rich.progress import (
     TimeRemainingColumn,
     MofNCompleteColumn,
 )
+
+load_dotenv()
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -267,21 +265,7 @@ Config = {
 }
 
 class FavoriteFetcher:
-    def __init__(self, Platform):
-        try:
-            # Load last fetch dates from json
-            with open('last_fetches.json', 'r') as f:
-                self.LastFetches = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.LastFetches = {}
-            
-        try:
-            # Load cached hashes per creator
-            with open('cached_hashes.json', 'r') as f:
-                self.CachedHashes = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            self.CachedHashes = {}
-
+    def __init__(self, Platform): # Platform: coomer, kemono
         Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
         Session = requests.Session()
         Session.headers.update({
@@ -309,12 +293,6 @@ class FavoriteFetcher:
                     Config[Service]['ids'] = []
                 if 'names' not in Config[Service]:
                     Config[Service]['names'] = []
-                    
-                # Initialize service in cache structures if needed
-                if Service not in self.LastFetches:
-                    self.LastFetches[Service] = {}
-                if Service not in self.CachedHashes:
-                    self.CachedHashes[Service] = {}
 
             for Item in Data:
                 Service = Item.get('service')
@@ -332,307 +310,173 @@ class FavoriteFetcher:
 #                                                          #
 ############################################################
 
-class AsyncDownloader:
-    def __init__(self, ChunkSize=1024*1024):
-        self.ChunkSize = ChunkSize
-        self.Session = None
-        self.Semaphore = asyncio.Semaphore(32)  # Limit concurrent connections
-        
-    async def InitSession(self):
-        self.Session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=None, connect=60),
-            connector=aiohttp.TCPConnector(limit=32)
-        )
-        
-    async def CloseSession(self):
-        if self.Session:
-            await self.Session.close()
-            
-    async def DownloadFile(self, FileData, ProgressCallback):
-        FileHash, FileUrl, FilePath = FileData
-        async with self.Semaphore:
-            try:
-                async with self.Session.get(FileUrl) as Response:
-                    if Response.status == 200:
-                        if not Config['dry_run']:
-                            os.makedirs(os.path.dirname(FilePath), exist_ok=True)
-                            Downloaded = 0
-                            FileSize = int(Response.headers.get('content-length', 0))
-                            
-                            async with aiofiles.open(FilePath, 'wb') as f:
-                                async for Chunk in Response.content.iter_chunked(self.ChunkSize):
-                                    if Chunk:
-                                        await f.write(Chunk)
-                                        Downloaded += len(Chunk)
-                                        ProgressCallback(Downloaded, FileSize, FileHash)
-                        else:
-                            # Simulate download
-                            FileSize = int(Response.headers.get('content-length', 1024*1024))
-                            Downloaded = 0
-                            while Downloaded < FileSize:
-                                await asyncio.sleep(0.05)
-                                ThisChunk = min(self.ChunkSize, FileSize - Downloaded)
-                                Downloaded += ThisChunk
-                                ProgressCallback(Downloaded, FileSize, FileHash)
-                                
-                        return True
-                return False
-            except Exception:
-                return False
+@dataclass
+class DownloadItem:
+    """Represents a single file to be downloaded"""
+    FileHash: str
+    FileUrl: str 
+    SavePath: str
+    Platform: str
+    Creator: str
+    FileSize: Optional[int] = None
+    RetryCount: int = 0
 
-class DownloadManager:
-    def __init__(self, FileList, FetcherInstance):
-        self.FileList = FileList
-        self.Fetcher = FetcherInstance
-        self.Stats = {
-            'TotalBytes': 0,
-            'FailedFiles': 0,
-            'SuccessfulFiles': 0,
-            'TotalFiles': len(FileList),
-            'StartTime': time.time(),
-            'EndTime': None,
-            'AverageSpeed': 0,
-            'CurrentFile': "Initializing..."
-        }
-        self.Stats.update({
-            'FetchTime': 0,
-            'DownloadTime': 0,
-            'DirectoryTime': 0,
-            'TotalDownloaded': 0,
-            'AverageFileSize': 0,
-            'PeakSpeed': 0,
-            'SuccessRate': 0
-        })
-        self.StatsLock = threading.Lock()
-        self.MaxWorkers = Config['threads']['max_workers']
-        self.MinSpace = 5e+9
-        self.StopDownloads = False
+class AsyncDownloadManager:
+    """Handles async downloads with retry logic and progress tracking"""
+    def __init__(self, FileList: list, MaxConcurrent: int = 32):
+        self.Items = [DownloadItem(FileHash=f[0][0], FileUrl=f[0][1], SavePath=f[0][2], 
+                                 Platform=f[1], Creator=f[2]) for f in FileList]
+        self.MaxConcurrent = MaxConcurrent
+        self.ProcessedHashes = set()
         self.DryRun = Config.get('dry_run', False)
-        self.ProcessedFiles = 0
-        self.CachedHashes = {}
+        self.TotalFiles = len(FileList)
+        self.CompletedFiles = 0
+        self.FailedFiles = 0
+        self.TotalBytes = 0
         self.NewHashes = {}
-        self.LoadCachedHashes()
-        self.ProcessedHashes = set()  # Track processed hashes to prevent duplicates
-        self.CompletedFiles = set()  # Track completed files globally
-        self.FileQueue = queue.Queue()  # Queue for files to download
-        for FileData in FileList:
-            self.FileQueue.put(FileData)
-        
-    def LoadCachedHashes(self):
-        """Load previously downloaded file hashes per platform and creator"""
+        self.Lock = asyncio.Lock()
+
+    async def Start(self) -> bool:
         try:
-            with open('cached_hashes.json', 'r') as f:
-                self.CachedHashes = json.load(f)
-            Config['cached_hashes'] = self.CachedHashes  # Update Config
-            Logger.Debug(f"Loaded cached hashes for {len(self.CachedHashes)} platforms")
-        except (FileNotFoundError, json.JSONDecodeError):
-            Logger.Debug("No cached hashes found, starting fresh")
-            self.CachedHashes = {}
-            Config['cached_hashes'] = self.CachedHashes  # Initialize in Config
-            
-    def SaveNewHashes(self):
-        """Save new hashes to cache file, organized by platform and creator"""
-        if self.NewHashes:
-            try:
-                # Merge new hashes with existing ones
-                for Platform in self.NewHashes:
-                    if Platform not in self.CachedHashes:
-                        self.CachedHashes[Platform] = {}
-                    
-                    for Creator in self.NewHashes[Platform]:
-                        if Creator not in self.CachedHashes[Platform]:
-                            self.CachedHashes[Platform][Creator] = []
-                        
-                        # Add new unique hashes
-                        self.CachedHashes[Platform][Creator] = list(set(
-                            self.CachedHashes[Platform][Creator] + 
-                            self.NewHashes[Platform][Creator]
-                        ))
+            self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
+            async with aiohttp.ClientSession() as Session:
+                self.Session = Session
+
+                ProgressColumns = [
+                    TextColumn("[cyan]Downloading"),
+                    BarColumn(bar_width=40),
+                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                    TextColumn("•"),
+                    TextColumn("[blue]{task.fields[file]}"),
+                    TextColumn("•"),
+                    TextColumn("{task.fields[size]}"),
+                    TextColumn("•"),
+                    MofNCompleteColumn(),
+                    TimeRemainingColumn(),
+                ]
+
+                Progress_Bar = Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False)
                 
-                with open('cached_hashes.json', 'w') as f:
-                    json.dump(self.CachedHashes, f, indent=4)
-                
-                TotalHashes = sum(
-                    len(Hashes) 
-                    for Platform in self.NewHashes 
-                    for Creator, Hashes in self.NewHashes[Platform].items()
-                )
-                Logger.Debug(f"Saved {TotalHashes} new hashes to cache")
-            except Exception as e:
-                Logger.Error(f"Failed to save hashes: {e}")
-        
-    def PrintSummary(self):
-        """Print formatted summary table of the download operation"""
-        SummaryTable = Table(
-            title="\n[bold cyan]Download Summary[/bold cyan]",
-            show_header=True,
-            header_style="bold magenta",
-            border_style="blue",
-            box=box.ROUNDED
-        )
-        
-        # Add columns
-        SummaryTable.add_column("Metric", style="cyan", no_wrap=True)
-        SummaryTable.add_column("Value", style="green")
-        
-        # Calculate additional stats
-        TotalTime = time.time() - self.Stats['StartTime']
-        SuccessRate = (self.Stats['SuccessfulFiles'] / self.Stats['TotalFiles']) * 100 if self.Stats['TotalFiles'] > 0 else 0
-        AverageSpeed = self.Stats['TotalDownloaded'] / TotalTime if TotalTime > 0 else 0
-        AverageFileSize = self.Stats['TotalDownloaded'] / self.Stats['SuccessfulFiles'] if self.Stats['SuccessfulFiles'] > 0 else 0
-        
-        # Add rows
-        SummaryTable.add_row("Operation Mode", "[yellow]Dry Run[/yellow]" if self.DryRun else "[green]Real Download[/green]")
-        SummaryTable.add_row("Total Files", str(self.Stats['TotalFiles']))
-        SummaryTable.add_row("Successfully Downloaded", f"{self.Stats['SuccessfulFiles']} ({SuccessRate:.1f}%)")
-        SummaryTable.add_row("Failed Downloads", str(self.Stats['FailedFiles']))
-        SummaryTable.add_row("Total Data Downloaded", self.HumanizeBytes(self.Stats['TotalDownloaded']))
-        SummaryTable.add_row("Average File Size", self.HumanizeBytes(AverageFileSize))
-        SummaryTable.add_row("Average Speed", f"{self.HumanizeBytes(AverageSpeed)}/s")
-        SummaryTable.add_row("Peak Speed", f"{self.HumanizeBytes(self.Stats['PeakSpeed'])}/s")
-        SummaryTable.add_row("Total Time", self.HumanizeTime(TotalTime))
-        SummaryTable.add_row("Skipped (Cached)", str(self.Stats.get('SkippedFiles', 0)))
-        
-        Console().print(SummaryTable)
-        
-    def Download(self):
-        try:
-            StartTime = time.time()
-            ProgressColumns = [
-                TextColumn("[cyan]Downloading"),
-                BarColumn(bar_width=40),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                TextColumn("•"),
-                TextColumn("[blue]{task.fields[current_file]}"),
-                TextColumn("•"), 
-                TextColumn("{task.fields[file_size]}"),
-                TextColumn("•"),
-                MofNCompleteColumn(),
-                TextColumn("•"),
-                TextColumn("[yellow]{task.fields[speed]}/s"),
-                TimeRemainingColumn(),
-            ]
+                with Progress_Bar as progress:
+                    task_id = progress.add_task(
+                        "Downloading",
+                        total=self.TotalFiles,
+                        file="Starting...",
+                        size="0 B"
+                    )
 
-            with Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False) as ProgressBar:
-                MainTask = ProgressBar.add_task(
-                    "Downloading",
-                    total=self.FileQueue.qsize(),
-                    current_file="Initializing...",
-                    file_size="0 B",
-                    speed="0 B/s"
-                )
-
-                def ProcessFile():
-                    while not self.FileQueue.empty() and not self.StopDownloads:
-                        try:
-                            FileData, Platform, Creator = self.FileQueue.get_nowait()
-                        except queue.Empty:
-                            return
-
-                        FileHash, FileUrl, FilePath = FileData
-
-                        # Skip if already downloaded
-                        if FileHash in self.CompletedFiles:
-                            self.FileQueue.task_done()
-                            continue
-
-                        try:
-                            # Get file size before downloading
-                            Response = requests.head(FileUrl, allow_redirects=True)
-                            if Response.status_code != 200:
-                                self.FileQueue.task_done()
-                                continue
-
-                            FileSize = int(Response.headers.get('content-length', 0))
-                            FileExtension = os.path.splitext(FileUrl)[1]
-
-                            if self.DryRun:
-                                time.sleep(0.1)
-                                with self.StatsLock:
-                                    self.ProcessedFiles += 1
-                                    self.CompletedFiles.add(FileHash)
-                                    ProgressBar.update(MainTask, advance=1)
-                                    ProgressBar.refresh()
-                                self.FileQueue.task_done()
-                                continue
-
-                            # Actual download
-                            Response = requests.get(FileUrl, stream=True)
-                            if Response.status_code == 200:
-                                os.makedirs(os.path.dirname(FilePath), exist_ok=True)
-                                Downloaded = 0
-                                StartTime = time.time()
-
-                                with open(FilePath, 'wb') as f:
-                                    for Chunk in Response.iter_content(chunk_size=1024*1024):
-                                        if Chunk:
-                                            f.write(Chunk)
-                                            Downloaded += len(Chunk)
-                                            ElapsedTime = time.time() - StartTime
-                                            Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
-
-                                            ProgressBar.update(
-                                                MainTask,
-                                                current_file=f"{FileHash[:20]}..{FileExtension}",
-                                                file_size=self.HumanizeBytes(FileSize),
-                                                speed=self.HumanizeBytes(Speed)
-                                            )
-                                            ProgressBar.refresh()
-
-                                with self.StatsLock:
-                                    self.ProcessedFiles += 1
-                                    self.CompletedFiles.add(FileHash)
-                                    self.Stats['TotalDownloaded'] += Downloaded
-                                    self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
-                                    ProgressBar.update(MainTask, advance=1)
-                                    ProgressBar.refresh()
-
-                        except Exception as e:
-                            Logger.Error(f"Download error for {FileHash}: {str(e)}")
-                        finally:
-                            self.FileQueue.task_done()
-
-                # Use ThreadPoolExecutor for concurrent downloads
-                with ThreadPoolExecutor(max_workers=self.MaxWorkers) as Executor:
-                    Futures = [
-                        Executor.submit(ProcessFile)
-                        for _ in range(min(self.MaxWorkers, self.FileQueue.qsize()))
-                    ]
+                    # Create download tasks for all files
+                    tasks = []
+                    for item in self.Items:
+                        if item.FileHash not in self.ProcessedHashes:
+                            tasks.append(self.DownloadFile(item, progress, task_id))
                     
-                    # Wait for all tasks to complete
-                    self.FileQueue.join()
+                    if tasks:
+                        await asyncio.gather(*tasks)
 
-            self.Stats['DownloadTime'] = time.time() - StartTime
-            self.SaveNewHashes()
-            self.PrintSummary()
+            await self.SaveNewHashes()
             return True
-
-        except Exception as e:
-            Logger.Error(f"Error in download process: {e}")
+            
+        except Exception as Error:
+            Logger.Error(f"Download manager error: {str(Error)}")
             return False
 
+    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
+    async def DownloadFile(self, Item: DownloadItem, progress, task_id) -> bool:
+        try:
+            async with self.Semaphore:
+                if Item.FileHash in self.ProcessedHashes:
+                    return True
+
+                # Get file size first
+                async with self.Session.head(Item.FileUrl, allow_redirects=True) as Response:
+                    if Response.status != 200:
+                        raise Exception(f"Failed to get file size: {Response.status}")
+                    FileSize = int(Response.headers.get('content-length', 0))
+                    Item.FileSize = FileSize
+
+                if self.DryRun:
+                    await asyncio.sleep(0.2)
+                    async with self.Lock:
+                        self.CompletedFiles += 1
+                        self.ProcessedHashes.add(Item.FileHash)
+                        progress.update(task_id, completed=self.CompletedFiles, 
+                                     file=f"{Item.FileHash[:20]}...", 
+                                     size=self.HumanizeBytes(FileSize))
+                        progress.refresh()  # Add refresh here for dry run
+                    return True
+
+                # Real download
+                TempPath = f"{Item.SavePath}.downloading"
+                async with self.Session.get(Item.FileUrl) as Response:
+                    if Response.status == 200:
+                        os.makedirs(os.path.dirname(Item.SavePath), exist_ok=True)
+                        
+                        async with aiofiles.open(TempPath, 'wb') as f:
+                            Downloaded = 0
+                            async for Chunk in Response.content.iter_chunked(1024*1024):
+                                if Chunk:
+                                    await f.write(Chunk)
+                                    Downloaded += len(Chunk)
+                                    async with self.Lock:
+                                        progress.update(task_id, 
+                                                      file=f"{Item.FileHash[:20]}...",
+                                                      size=self.HumanizeBytes(Downloaded))
+                                        progress.refresh()  # Add refresh here for chunk updates
+
+                        # Rename from .downloading to final name
+                        os.rename(TempPath, Item.SavePath)
+                        
+                        # Track hash for caching
+                        async with self.Lock:
+                            if Item.Platform not in self.NewHashes:
+                                self.NewHashes[Item.Platform] = {}
+                            if Item.Creator not in self.NewHashes[Item.Platform]:
+                                self.NewHashes[Item.Platform][Item.Creator] = []
+                            self.NewHashes[Item.Platform][Item.Creator].append(Item.FileHash)
+                            
+                            self.CompletedFiles += 1
+                            self.ProcessedHashes.add(Item.FileHash)
+                            self.TotalBytes += Downloaded
+                            progress.update(task_id, completed=self.CompletedFiles)
+
+                        return True
+
+                return False
+
+        except Exception as Error:
+            self.FailedFiles += 1
+            if os.path.exists(f"{Item.SavePath}.downloading"):
+                os.remove(f"{Item.SavePath}.downloading")
+            raise Error
+
     @staticmethod
-    def HumanizeBytes(Bytes):
+    def HumanizeBytes(Bytes: int) -> str:
         for Unit in ['B', 'KB', 'MB', 'GB', 'TB']:
             if Bytes < 1024:
                 return f"{Bytes:.2f} {Unit}"
             Bytes /= 1024
 
-    @staticmethod
-    def HumanizeTime(Seconds):
-        return str(datetime.timedelta(seconds=Seconds))
-    
-    def GetFileSize(self, Url):
-        # Method to get the size of the file from the URL
-        Response = requests.head(Url)
-        if 'Content-Length' in Response.headers:
-            return int(Response.headers['Content-Length'])
-        return 0
+    async def SaveNewHashes(self):
+        try:
+            async with aiofiles.open('cached_hashes.json', 'r') as f:
+                Content = await f.read()
+                CachedHashes = json.loads(Content)
+        except (FileNotFoundError, json.JSONDecodeError):
+            CachedHashes = {}
+            
+        # Update cache with new hashes
+        for Platform in self.NewHashes:
+            if Platform not in CachedHashes:
+                CachedHashes[Platform] = {}
+            for Creator in self.NewHashes[Platform]:
+                if Creator not in CachedHashes[Platform]:
+                    CachedHashes[Platform][Creator] = []
+                CachedHashes[Platform][Creator].extend(self.NewHashes[Platform][Creator])
+                CachedHashes[Platform][Creator] = list(set(CachedHashes[Platform][Creator]))
 
-    # Remove the ExtractPathInfo method
-    # def ExtractPathInfo(self, FilePath):
-    #     # ...unused method...
-    #     return None, None
+        async with aiofiles.open('cached_hashes.json', 'w') as f:
+            await f.write(json.dumps(CachedHashes, indent=4))
 
 ############################################################
 #                                                          #
@@ -965,9 +809,6 @@ def Main():
         FavoriteFetcher('coomer')  # Fetch favorites from Coomer
         FavoriteFetcher('kemono')  # Fetch favorites from Kemono
 
-        # Ensure Config['cached_hashes'] is available
-        Config['cached_hashes'] = DownloadManager([], None).CachedHashes
-
         for Platform in Config['directory_names'].keys():
             if Platform in ['rule34', 'e621']:
                 for Creator in Config[Platform]['ids']:
@@ -1066,8 +907,9 @@ def Main():
                         AllFiles.extend([(FileData, Platform, Creator) for FileData in Result[Platform][Creator]])
                         
             if AllFiles:
-                # Use DownloadManager instead of separate functions
-                DownloadManager(AllFiles, None).Download()
+                # Use asyncio.run to start the async download manager
+                Downloader = AsyncDownloadManager(AllFiles)
+                asyncio.run(Downloader.Start())
 
     except KeyboardInterrupt:
         Logger.Warning("Interrupted by user")
