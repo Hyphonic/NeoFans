@@ -258,7 +258,7 @@ Config = {
         'fanbox': True,
         'gumroad': True
     },
-    'global_limit': 500,
+    'global_limit': 50,
     'dry_run': False,
     'platform_limit_debug': 1,
     'cached_hashes': {}  # Initialize cached_hashes
@@ -396,7 +396,7 @@ class AsyncDownloadManager:
                     Item.FileSize = FileSize
 
                 if self.DryRun:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(5)
                     async with self.Lock:
                         self.CompletedFiles += 1
                         self.ProcessedHashes.add(Item.FileHash)
@@ -422,7 +422,7 @@ class AsyncDownloadManager:
                                         progress.update(task_id, 
                                                       file=f"{Item.FileHash[:20]}...",
                                                       size=self.HumanizeBytes(Downloaded))
-                                        progress.refresh()  # Add refresh here for chunk updates
+                            progress.refresh()  # Add refresh here for chunk updates
 
                         # Rename from .downloading to final name
                         os.rename(TempPath, Item.SavePath)
