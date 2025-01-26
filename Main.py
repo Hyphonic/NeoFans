@@ -499,14 +499,12 @@ class DownloadManager:
                 TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
                 TextColumn("•"),
                 TextColumn("[blue]{task.fields[current_file]}"),
-                TextColumn("•"),
-                TextColumn("{task.fields[file_hash]}.{task.fields[file_type]}"),
-                TextColumn("•"),
+                TextColumn("•"), 
                 TextColumn("{task.fields[file_size]}"),
                 TextColumn("•"),
                 MofNCompleteColumn(),
                 TextColumn("•"),
-                TextColumn("[yellow]{task.fields[speed]}"),
+                TextColumn("[yellow]{task.fields[speed]}/s"),
                 TimeRemainingColumn(),
             ]
 
@@ -515,94 +513,95 @@ class DownloadManager:
                     "Downloading",
                     total=len(self.FileList),
                     current_file="Initializing...",
-                    file_hash="",
-                    file_type="",
                     file_size="0 B",
                     speed="0 B/s"
                 )
-                
+
+                # Track which files are being processed
+                ProcessingFiles = set()
+                ProcessingLock = threading.Lock()
+
                 def ProcessFile(FileData, Platform, Creator):
-                    try:
-                        FileHash, FileUrl, FilePath = FileData
-                        
-                        # Skip if we've already processed this hash
-                        if FileHash in self.ProcessedHashes:
-                            with self.StatsLock:
-                                self.Stats['SkippedFiles'] = self.Stats.get('SkippedFiles', 0) + 1
-                                self.ProcessedFiles += 1
+                    FileHash, FileUrl, FilePath = FileData
+
+                    # Skip if file is already being processed
+                    with ProcessingLock:
+                        if FileHash in ProcessingFiles:
                             return True
-                        
-                        # Get actual file size before downloading
+                        ProcessingFiles.add(FileHash)
+
+                    try:
+                        # Get file size before downloading
                         Response = requests.head(FileUrl, allow_redirects=True)
+                        if Response.status_code != 200:
+                            return False
+
+                        FileSize = int(Response.headers.get('content-length', 0))
+                        FileExtension = os.path.splitext(FileUrl)[1]
+
+                        if self.DryRun:
+                            time.sleep(0.1)  # Simulate download
+                            with self.StatsLock:
+                                self.ProcessedFiles += 1
+                                ProgressBar.update(MainTask, advance=1)
+                                ProgressBar.refresh()
+                            return True
+
+                        # Actual download
+                        Response = requests.get(FileUrl, stream=True)
                         if Response.status_code == 200:
-                            FileSize = int(Response.headers.get('content-length', 0))
-                            FileExtension = os.path.splitext(FileUrl)[1]
-                            
-                            # Update file path to use hash as filename
-                            FilePath = os.path.join(os.path.dirname(FilePath), f"{FileHash}{FileExtension}")
-                            
-                            ProgressBar.update(MainTask, 
-                                current_file="Downloading...", 
-                                file_hash=FileHash[:20],
-                                file_type=FileExtension,
-                                file_size=self.HumanizeBytes(FileSize))
+                            os.makedirs(os.path.dirname(FilePath), exist_ok=True)
+                            Downloaded = 0
+                            StartTime = time.time()
 
-                            if self.DryRun:
-                                # ...existing dry run code...
-                                self.ProcessedHashes.add(FileHash)
-                                return True
+                            with open(FilePath, 'wb') as f:
+                                for Chunk in Response.iter_content(chunk_size=1024*1024):
+                                    if Chunk:
+                                        f.write(Chunk)
+                                        Downloaded += len(Chunk)
+                                        ElapsedTime = time.time() - StartTime
+                                        Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
 
-                            # Real download
-                            Response = requests.get(FileUrl, stream=True)
-                            if Response.status_code == 200:
-                                os.makedirs(os.path.dirname(FilePath), exist_ok=True)
-                                Downloaded = 0
-                                FileStartTime = time.time()
-                                
-                                with open(FilePath, 'wb') as f:
-                                    for Chunk in Response.iter_content(chunk_size=1024*1024):
-                                        if Chunk:
-                                            f.write(Chunk)
-                                            Downloaded += len(Chunk)
-                                            ElapsedTime = time.time() - FileStartTime
-                                            Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
-                                            
-                                            with self.StatsLock:
-                                                ProgressBar.update(
-                                                    MainTask,
-                                                    current_file=FileHash[:20],
-                                                    speed=f"{self.HumanizeBytes(Speed)}/s"
-                                                )
-                                                ProgressBar.refresh()
+                                        ProgressBar.update(
+                                            MainTask,
+                                            current_file=f"{FileHash[:20]}..{FileExtension}",
+                                            file_size=self.HumanizeBytes(FileSize),
+                                            speed=self.HumanizeBytes(Speed)
+                                        )
+                                        ProgressBar.refresh()
 
-                                self.ProcessedHashes.add(FileHash)
-                                
-                                with self.StatsLock:
-                                    self.ProcessedFiles += 1
-                                    self.Stats['TotalDownloaded'] += Downloaded
-                                    self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
-                                    ProgressBar.update(MainTask, advance=1)
-                                    ProgressBar.refresh()
-                                    
-                                return True
-                                
+                            with self.StatsLock:
+                                self.ProcessedFiles += 1
+                                self.Stats['TotalDownloaded'] += Downloaded
+                                self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
+                                ProgressBar.update(MainTask, advance=1)
+                                ProgressBar.refresh()
+
+                            return True
+
                         return False
 
                     except Exception as e:
                         Logger.Error(f"Download error for {FileHash}: {str(e)}")
-                        with self.StatsLock:
-                            self.Stats['FailedFiles'] += 1
                         return False
+                    finally:
+                        # Remove file from processing set when done
+                        with ProcessingLock:
+                            ProcessingFiles.discard(FileHash)
 
+                # Use ThreadPoolExecutor for concurrent downloads
                 with ThreadPoolExecutor(max_workers=self.MaxWorkers) as Executor:
-                    Futures = [Executor.submit(ProcessFile, FileData, Platform, Creator) for FileData, Platform, Creator in self.FileList]
+                    Futures = [
+                        Executor.submit(ProcessFile, FileData, Platform, Creator)
+                        for FileData, Platform, Creator in self.FileList
+                    ]
                     for Future in as_completed(Futures):
                         if self.StopDownloads:
                             break
-                            
+
             self.Stats['DownloadTime'] = time.time() - StartTime
-            self.SaveNewHashes()  # Save new hashes after successful downloads
-            self.PrintSummary()  # Print summary table after completion
+            self.SaveNewHashes()
+            self.PrintSummary()
             return True
 
         except Exception as e:
