@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.table import Table
 from typing import Dict
@@ -11,6 +11,7 @@ import aiofiles
 import aiohttp
 import asyncio
 import random
+import queue
 import time
 import html
 import json
@@ -412,6 +413,10 @@ class DownloadManager:
         self.NewHashes = {}
         self.LoadCachedHashes()
         self.ProcessedHashes = set()  # Track processed hashes to prevent duplicates
+        self.CompletedFiles = set()  # Track completed files globally
+        self.FileQueue = queue.Queue()  # Queue for files to download
+        for FileData in FileList:
+            self.FileQueue.put(FileData)
         
     def LoadCachedHashes(self):
         """Load previously downloaded file hashes per platform and creator"""
@@ -511,93 +516,91 @@ class DownloadManager:
             with Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False) as ProgressBar:
                 MainTask = ProgressBar.add_task(
                     "Downloading",
-                    total=len(self.FileList),
+                    total=self.FileQueue.qsize(),
                     current_file="Initializing...",
                     file_size="0 B",
                     speed="0 B/s"
                 )
 
-                # Track which files are being processed
-                ProcessingFiles = set()
-                ProcessingLock = threading.Lock()
+                def ProcessFile():
+                    while not self.FileQueue.empty() and not self.StopDownloads:
+                        try:
+                            FileData, Platform, Creator = self.FileQueue.get_nowait()
+                        except queue.Empty:
+                            return
 
-                def ProcessFile(FileData, Platform, Creator):
-                    FileHash, FileUrl, FilePath = FileData
+                        FileHash, FileUrl, FilePath = FileData
 
-                    # Skip if file is already being processed
-                    with ProcessingLock:
-                        if FileHash in ProcessingFiles:
-                            return True
-                        ProcessingFiles.add(FileHash)
+                        # Skip if already downloaded
+                        if FileHash in self.CompletedFiles:
+                            self.FileQueue.task_done()
+                            continue
 
-                    try:
-                        # Get file size before downloading
-                        Response = requests.head(FileUrl, allow_redirects=True)
-                        if Response.status_code != 200:
-                            return False
+                        try:
+                            # Get file size before downloading
+                            Response = requests.head(FileUrl, allow_redirects=True)
+                            if Response.status_code != 200:
+                                self.FileQueue.task_done()
+                                continue
 
-                        FileSize = int(Response.headers.get('content-length', 0))
-                        FileExtension = os.path.splitext(FileUrl)[1]
+                            FileSize = int(Response.headers.get('content-length', 0))
+                            FileExtension = os.path.splitext(FileUrl)[1]
 
-                        if self.DryRun:
-                            time.sleep(0.1)  # Simulate download
-                            with self.StatsLock:
-                                self.ProcessedFiles += 1
-                                ProgressBar.update(MainTask, advance=1)
-                                ProgressBar.refresh()
-                            return True
+                            if self.DryRun:
+                                time.sleep(0.1)
+                                with self.StatsLock:
+                                    self.ProcessedFiles += 1
+                                    self.CompletedFiles.add(FileHash)
+                                    ProgressBar.update(MainTask, advance=1)
+                                    ProgressBar.refresh()
+                                self.FileQueue.task_done()
+                                continue
 
-                        # Actual download
-                        Response = requests.get(FileUrl, stream=True)
-                        if Response.status_code == 200:
-                            os.makedirs(os.path.dirname(FilePath), exist_ok=True)
-                            Downloaded = 0
-                            StartTime = time.time()
+                            # Actual download
+                            Response = requests.get(FileUrl, stream=True)
+                            if Response.status_code == 200:
+                                os.makedirs(os.path.dirname(FilePath), exist_ok=True)
+                                Downloaded = 0
+                                StartTime = time.time()
 
-                            with open(FilePath, 'wb') as f:
-                                for Chunk in Response.iter_content(chunk_size=1024*1024):
-                                    if Chunk:
-                                        f.write(Chunk)
-                                        Downloaded += len(Chunk)
-                                        ElapsedTime = time.time() - StartTime
-                                        Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
+                                with open(FilePath, 'wb') as f:
+                                    for Chunk in Response.iter_content(chunk_size=1024*1024):
+                                        if Chunk:
+                                            f.write(Chunk)
+                                            Downloaded += len(Chunk)
+                                            ElapsedTime = time.time() - StartTime
+                                            Speed = Downloaded / ElapsedTime if ElapsedTime > 0 else 0
 
-                                        ProgressBar.update(
-                                            MainTask,
-                                            current_file=f"{FileHash[:20]}..{FileExtension}",
-                                            file_size=self.HumanizeBytes(FileSize),
-                                            speed=self.HumanizeBytes(Speed)
-                                        )
-                                        ProgressBar.refresh()
+                                            ProgressBar.update(
+                                                MainTask,
+                                                current_file=f"{FileHash[:20]}..{FileExtension}",
+                                                file_size=self.HumanizeBytes(FileSize),
+                                                speed=self.HumanizeBytes(Speed)
+                                            )
+                                            ProgressBar.refresh()
 
-                            with self.StatsLock:
-                                self.ProcessedFiles += 1
-                                self.Stats['TotalDownloaded'] += Downloaded
-                                self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
-                                ProgressBar.update(MainTask, advance=1)
-                                ProgressBar.refresh()
+                                with self.StatsLock:
+                                    self.ProcessedFiles += 1
+                                    self.CompletedFiles.add(FileHash)
+                                    self.Stats['TotalDownloaded'] += Downloaded
+                                    self.Stats['PeakSpeed'] = max(self.Stats['PeakSpeed'], Speed)
+                                    ProgressBar.update(MainTask, advance=1)
+                                    ProgressBar.refresh()
 
-                            return True
-
-                        return False
-
-                    except Exception as e:
-                        Logger.Error(f"Download error for {FileHash}: {str(e)}")
-                        return False
-                    finally:
-                        # Remove file from processing set when done
-                        with ProcessingLock:
-                            ProcessingFiles.discard(FileHash)
+                        except Exception as e:
+                            Logger.Error(f"Download error for {FileHash}: {str(e)}")
+                        finally:
+                            self.FileQueue.task_done()
 
                 # Use ThreadPoolExecutor for concurrent downloads
                 with ThreadPoolExecutor(max_workers=self.MaxWorkers) as Executor:
                     Futures = [
-                        Executor.submit(ProcessFile, FileData, Platform, Creator)
-                        for FileData, Platform, Creator in self.FileList
+                        Executor.submit(ProcessFile)
+                        for _ in range(min(self.MaxWorkers, self.FileQueue.qsize()))
                     ]
-                    for Future in as_completed(Futures):
-                        if self.StopDownloads:
-                            break
+                    
+                    # Wait for all tasks to complete
+                    self.FileQueue.join()
 
             self.Stats['DownloadTime'] = time.time() - StartTime
             self.SaveNewHashes()
@@ -936,7 +939,7 @@ Screen = r'''
                                                                                       
   [bold cyan]Rule34[/bold cyan] | [cornflower_blue]OnlyFans[/cornflower_blue] | [dodger_blue2]Fansly[/dodger_blue2] | [salmon1]Patreon[/salmon1] | [dark_cyan]SubscribeStar[/dark_cyan] | [deep_sky_blue4]E621[/deep_sky_blue4] | [sky_blue1]Fanbox[/sky_blue1] | [hot_pink]Gumroad[/hot_pink]
   by [light_coral]https://github.com/Hyphonic
-  [white]Version 2.2.0
+  [white]Version 3.0.1
 
 
 '''
