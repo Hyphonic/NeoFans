@@ -277,7 +277,8 @@ Config = {
     'global_limit': 5000,
     'dry_run': Parser.parse_args().dry_run,
     'platform_limit_debug': 1,
-    'cached_hashes': {}  # Initialize cached_hashes
+    'cached_hashes': {},  # Initialize cached_hashes
+    'version': '3.0.1'
 }
 
 class FavoriteFetcher:
@@ -437,7 +438,7 @@ class AsyncDownloadManager:
                     # Get file size first
                     async with self.Session.head(Item.FileUrl, allow_redirects=True) as Response:
                         if Response.status != 200:
-                            Logger.Warning(f"Failed to get size for {Item.FileHash}: {Response.status}")
+                            #Logger.Warning(f"Failed to get size for {Item.FileHash}: {Response.status}")
                             return False
                         FileSize = int(Response.headers.get('content-length', 0))
                         Item.FileSize = FileSize
@@ -547,7 +548,7 @@ class Fetcher:
             'accept': 'application/json',
             'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'en-US,en;q=0.9',
-            'user-agent': 'Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/63.0.3239.84 TV Safari/537.36'
+            'user-agent': f'NeoFans/{Config["version"]} (Hyphoduck)'
         })
 
         try:
@@ -827,7 +828,7 @@ def CheckForDuplicateIds():
             for Duplicate in Duplicates:
                 Logger.Warning(f"∙ {Duplicate}")
 
-Screen = r'''
+Screen = rf'''
 
  __   __     ______     ______     ______   ______     __   __     ______    
 /\ "-.\ \   /\  ___\   /\  __ \   /\  ___\ /\  __ \   /\ "-.\ \   /\  ___\   
@@ -836,8 +837,7 @@ Screen = r'''
   \/_/ \/_/   \/_____/   \/_____/   \/_/     \/_/\/_/   \/_/ \/_/   \/_____/
                                                                                       
   [bold cyan]Rule34[/bold cyan] | [cornflower_blue]OnlyFans[/cornflower_blue] | [dodger_blue2]Fansly[/dodger_blue2] | [salmon1]Patreon[/salmon1] | [dark_cyan]SubscribeStar[/dark_cyan] | [deep_sky_blue4]E621[/deep_sky_blue4] | [sky_blue1]Fanbox[/sky_blue1] | [hot_pink]Gumroad[/hot_pink]
-  by [light_coral]https://github.com/Hyphonic
-  [white]Version 3.0.1
+  by [light_coral]https://github.com/Hyphonic[/light_coral] | [white]Version {Config['version']}[/white]
 
 
 '''
