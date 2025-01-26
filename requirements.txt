@@ -2,3 +2,5 @@ rich
 requests
 aiohttp
 aiofiles
+python-dotenv
+backoff
