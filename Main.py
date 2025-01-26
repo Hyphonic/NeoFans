@@ -1045,13 +1045,13 @@ def Main():
                         )
                         
                         Config['global_limit'], Result = Fetcher(
-                            platform=Platform,
-                            id=Id,
-                            name=Name,
-                            directoryName=DirectoryName,
-                            cachedHashes=Config['cached_hashes'],
-                            creatorLimit=Config[Platform]['creator_limit'],
-                            globalLimit=Config['global_limit']
+                            Platform=Platform,
+                            Id=Id,
+                            Name=Name,
+                            DirectoryName=DirectoryName,
+                            CachedHashes=Config['cached_hashes'],
+                            CreatorLimit=Config[Platform]['creator_limit'],
+                            GlobalLimit=Config['global_limit']
                         ).Scrape()
                         Collection.append(Result)
                         ProgressBar.refresh()
