@@ -69,31 +69,31 @@ NeoFans uses a built-in config system that allows you to customize the behavior 
   <summary>Click here to see the config structure</summary>
 
 ```json
-{
-    {
-    'platform': {
-        'creator_limit': 1000, # Limit of posts to download per creator
-        'ids': [], # ID's usually represent the name of the creator, but in some cases it can be a number. Only used in URL Fetching.
-        'names': [], # Names of the creators. Used in Logging and Folder Naming.
-        'directory_names': [] # Used in Folder Naming.
+[
+  {
+    "platform": {
+      "creator_limit": 1000,
+      "ids": [],
+      "names": [],
+      "directory_names": []
     },
-    'directory_names': {
-        'platform': '🎨 Platform Name' # Used as the directory name.
+    "directory_names": {
+      "platform": "🎨 Platform Name"
     },
-    'platform_names': {
-        'platform': '[rich color]Platform Name[/rich color]' # Rich color tags are optional. Used in Logging.
+    "platform_names": {
+      "platform": "[rich color]Platform Name[/rich color]"
     },
-    'threads': {
-        'max_workers': 32 # Maximum amount of threads to use for downloading.
+    "threads": {
+      "max_workers": 32
     },
-    'enabled_platforms': { # Override creator_limit to 0 if platform not in enabled_platforms
-        'platform': True
+    "enabled_platforms": {
+      "platform": true
     },
-    'global_limit': 500, # Limit of posts to download globally
-    'dry_run': False, # If True, will not download anything.
-    'platform_limit_debug': 1, # Debugging purposes, overrides the amount of creators per platform.
-    }
-}
+    "global_limit": 500,
+    "dry_run": false,
+    "platform_limit_debug": 1
+  }
+]
 ```
 
 </details>

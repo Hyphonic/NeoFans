@@ -929,11 +929,11 @@ def CheckForDuplicateIds():
 
 Screen = r'''
 
- ______     __    __     __   __     __     ______   ______     __   __     ______    
-/\  __ \   /\ "-./  \   /\ "-.\ \   /\ \   /\  ___\ /\  __ \   /\ "-.\ \   /\  ___\   
-\ \ \/\ \  \ \ \-./\ \  \ \ \-.  \  \ \ \  \ \  __\ \ \  __ \  \ \ \-.  \  \ \___  \  
- \ \_____\  \ \_\ \ \_\  \ \_\\"\_\  \ \_\  \ \_\    \ \_\ \_\  \ \_\\"\_\  \/\_____\ 
-  \/_____/   \/_/  \/_/   \/_/ \/_/   \/_/   \/_/     \/_/\/_/   \/_/ \/_/   \/_____/ 
+ __   __     ______     ______     ______   ______     __   __     ______    
+/\ "-.\ \   /\  ___\   /\  __ \   /\  ___\ /\  __ \   /\ "-.\ \   /\  ___\   
+\ \ \-.  \  \ \  __\   \ \ \/\ \  \ \  __\ \ \  __ \  \ \ \-.  \  \ \___  \  
+ \ \_\\"\_\  \ \_____\  \ \_____\  \ \_\    \ \_\ \_\  \ \_\\"\_\  \/\_____\ 
+  \/_/ \/_/   \/_____/   \/_____/   \/_/     \/_/\/_/   \/_/ \/_/   \/_____/
                                                                                       
   [bold cyan]Rule34[/bold cyan] | [cornflower_blue]OnlyFans[/cornflower_blue] | [dodger_blue2]Fansly[/dodger_blue2] | [salmon1]Patreon[/salmon1] | [dark_cyan]SubscribeStar[/dark_cyan] | [deep_sky_blue4]E621[/deep_sky_blue4] | [sky_blue1]Fanbox[/sky_blue1] | [hot_pink]Gumroad[/hot_pink]
   by [light_coral]https://github.com/Hyphonic
