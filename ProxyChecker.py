@@ -62,9 +62,9 @@ class ProxyChecker:
         self.WorkingProxiesFound = 0
         self.Client = httpx.AsyncClient()
 
-    async def CheckProxy(self, Proxy: str) -> Optional[str]:
+    async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
         try:
-            async with httpx.AsyncClient(proxies={'http://': Proxy, 'https://': Proxy}, timeout=self.Timeout) as client:
+            async with httpx.AsyncClient(proxies={ProxyType: Proxy}, timeout=self.Timeout) as client:
                 Response = await client.get('http://www.google.com')
                 if Response.status_code == 200:
                     return Proxy
@@ -100,7 +100,7 @@ class ProxyChecker:
         Logger.info(f"Checking {TotalProxies} {ProxyType} proxies from {Url} using {self.MaxWorkers} workers")
 
         WorkingProxies = []
-        Tasks = [self.CheckProxy(Proxy) for Proxy in Proxies]
+        Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
         for Task in asyncio.as_completed(Tasks):
             Result = await Task
             if Result:
