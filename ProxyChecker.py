@@ -97,7 +97,7 @@ class ProxyChecker:
             Logger.warning(f"No proxies to check for {ProxyType} from {Url}")
             return
         
-        Logger.info(f"Checking {TotalProxies} {ProxyType} proxies from {Url} using {self.MaxWorkers} workers")
+        Logger.info(f"Checking {TotalProxies} {ProxyType.capitalize()} proxies using {self.MaxWorkers} workers")
 
         WorkingProxies = []
         Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
@@ -112,7 +112,7 @@ class ProxyChecker:
         except OSError as E:
             Logger.error(f"Failed to write working proxies to {ProxyDir}: {E}")
 
-        Logger.info(f"∙ Found {len(WorkingProxies)} working {ProxyType} proxies out of {TotalProxies} from {Url}")
+        Logger.info(f"∙ Found {len(WorkingProxies)} working {ProxyType} proxies out of {TotalProxies}")
         self.TotalProxiesChecked += TotalProxies
         self.WorkingProxiesFound += len(WorkingProxies)
 
