@@ -4,6 +4,13 @@ import httpx
 import time
 import os
 import asyncio
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TextColumn,
+    TimeRemainingColumn,
+)
 
 LogLevel = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -101,10 +108,33 @@ class ProxyChecker:
 
         WorkingProxies = []
         Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
-        for Task in asyncio.as_completed(Tasks):
-            Result = await Task
-            if Result:
-                WorkingProxies.append(Result)
+
+        ProgressColumns = [
+            TextColumn("{task.fields[proxy_type]}"),
+            BarColumn(bar_width=None),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            TextColumn("•"),
+            TextColumn("[blue]{task.fields[proxy]}"),
+            TextColumn("•"),
+            MofNCompleteColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+        ]
+
+        with Progress(*ProgressColumns, console=Logger.Console, auto_refresh=False, expand=True) as progress:
+            task_id = progress.add_task(
+                "Checking proxies",
+                total=TotalProxies,
+                proxy_type=ProxyType.capitalize(),
+                proxy="Starting..."
+            )
+
+            for Task in asyncio.as_completed(Tasks):
+                Result = await Task
+                if Result:
+                    WorkingProxies.append(Result)
+                progress.update(task_id, advance=1, proxy=Result if Result else "Failed")
+                progress.refresh()
 
         try:
             with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
