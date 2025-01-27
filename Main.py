@@ -280,9 +280,17 @@ Config = {
 }
 
 class FavoriteFetcher:
-    async def __init__(self, Platform): # Platform: coomer, kemono
-        Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
-        
+    def __init__(self, Platform):
+        self.Platform = Platform
+        self.Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
+
+    @classmethod
+    async def Create(cls, Platform):
+        self = cls(Platform)
+        await self.Initialize()
+        return self
+
+    async def Initialize(self):
         async with httpx.AsyncClient() as Client:
             Client.headers.update({
                 'accept': 'application/json',
@@ -293,18 +301,17 @@ class FavoriteFetcher:
 
             Client.cookies.set(
                 'session',
-                os.getenv('COOMER_SESS') if Platform == 'coomer' else os.getenv('KEMONO_SESS'),
-                domain=f'{Platform}.su',
+                os.getenv('COOMER_SESS') if self.Platform == 'coomer' else os.getenv('KEMONO_SESS'),
+                domain=f'{self.Platform}.su',
                 path='/'
             )
 
-            Response = await Client.get(Url)
+            Response = await Client.get(self.Url)
             
             if Response.status_code == 200:
                 Data = Response.json()
 
                 for Service in ['onlyfans', 'fansly', 'patreon', 'subscribestar', 'fanbox', 'gumroad']:
-                    # Initialize service in Config if needed
                     if 'ids' not in Config[Service]:
                         Config[Service]['ids'] = []
                     if 'names' not in Config[Service]:
@@ -843,8 +850,8 @@ async def Main():
             if not Config['enabled_platforms'][Platform]:
                 Config[Platform]['creator_limit'] = 0
 
-        await FavoriteFetcher('coomer')  # Fetch favorites from Coomer
-        await FavoriteFetcher('kemono')  # Fetch favorites from Kemono
+        await FavoriteFetcher.Create('coomer')  # Fetch favorites from Coomer
+        await FavoriteFetcher.Create('kemono')  # Fetch favorites from Kemono
 
         for Platform in Config['directory_names'].keys():
             if Platform in ['rule34', 'e621']:
