@@ -418,6 +418,16 @@ class AsyncDownloadManager:
             self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
             async with aiohttp.ClientSession() as Session:
                 self.Session = Session
+
+                try:
+                    ProxyType = random.choice(['http', 'socks4', 'socks5'])
+                    self.Session.proxies.update({
+                        ProxyType: random.choice(open(f'proxies/{ProxyType}.txt').read().splitlines())
+                    })
+                except Exception:
+                    pass
+
+                #Logger.Debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
                 
                 Logger.Info(f"∙ Downloading {self.TotalFiles} files...")
 
@@ -456,8 +466,8 @@ class AsyncDownloadManager:
                     for item in self.Items:
                         if not self.HashManager.HasHash(item.Platform, item.Creator, item.FileHash):
                             tasks.append(asyncio.create_task(self.DownloadFile(item, progress, task_id)))
-                        else:
-                            Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
+                        #else:
+                            #Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
                     
                     if tasks:
                         await asyncio.gather(*tasks)
@@ -695,7 +705,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -754,7 +764,7 @@ class Fetcher:
                                     
                                 FileHash = self.ExtractHash(FileUrl)
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -806,7 +816,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -825,7 +835,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
