@@ -405,12 +405,14 @@ class AsyncDownloadManager:
         self.Lock = asyncio.Lock()
         self.CacheManager = CacheManager()
         self.DiskSpaceErrorLogged = False
+        self.Session = None  # Add this line
 
     async def Start(self) -> bool:
         try:
             self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
             async with aiohttp.ClientSession() as Session:
-                SetupProxy(Session)
+                self.Session = Session  # Store session reference
+                SetupProxy(self.Session)
 
                 #Logger.Debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
                 
