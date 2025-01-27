@@ -13,7 +13,6 @@ import random
 import shutil
 import html
 import json
-import sys
 import os
 import re
 
@@ -280,54 +279,33 @@ Config = {
     'platform_limit_debug': 1,
     'cached_hashes': {},  # Initialize cached_hashes
     'version': '3.0.2',
-    'disk_space': 5e+9  # 5 GB
+    'disk_space': 5e+9,  # 5 GB
+    'max_file_size': 7.5e+8,  # 750 MB
+    'retries': {
+        'max_retries': 3,
+        'retry_delay': 5,
+        'retry_backoff': 2,
+        'retry_jitter': True,
+        'retry_max_delay': 60
+    },
+    'use_proxies': True,
 }
 
-class FavoriteFetcher:
-    def __init__(self, Platform): # Platform: coomer, kemono
-        Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
-        Session = requests.Session()
-        Session.headers.update({
-            'accept': 'application/json',
-            'accept-encoding': 'gzip, deflate, br',
-            'accept-language': 'en-US,en;q=0.9',
-            'user-agent': 'Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/63.0.3239.84 TV Safari/537.36'
-        })
-
-        Session.cookies.set(
-            'session',
-            os.getenv('COOMER_SESS') if Platform == 'coomer' else os.getenv('KEMONO_SESS'),
-            domain=f'{Platform}.su',
-            path='/'
-        )
-
-        Response = Session.get(Url)
-        
-        if Response.status_code == 200:
-            Data = Response.json()
-
-            for Service in ['onlyfans', 'fansly', 'patreon', 'subscribestar', 'fanbox', 'gumroad']:
-                # Initialize service in Config if needed
-                if 'ids' not in Config[Service]:
-                    Config[Service]['ids'] = []
-                if 'names' not in Config[Service]:
-                    Config[Service]['names'] = []
-
-            for Item in Data:
-                Service = Item.get('service')
-                CreatorId = Item.get('id')
-                CreatorName = Item.get('name')
-                Config[Service]['ids'].append(CreatorId)
-                Config[Service]['names'].append(CreatorName)
-
-                
-        Session.close()
-
-############################################################
-#                                                          #
-#                     Download Manager                     #
-#                                                          #
-############################################################
+def SetupProxy(Session):
+    """Helper to randomly assign a proxy to Session."""
+    if not Config.get('use_proxies', False):
+        return
+    try:
+        ProxyType = random.choice(['http', 'socks4', 'socks5'])
+        if not os.path.isdir('proxies'):
+            return
+        with open(f'proxies/{ProxyType}.txt') as ProxyFile:
+            Session.proxies.update({
+                ProxyType: random.choice(ProxyFile.read().splitlines())
+            })
+        # Logger.Debug(f'({ProxyType}) Using proxy {Session.proxies[ProxyType]}')
+    except Exception:
+        pass
 
 class InsufficientDiskSpaceError(Exception):
     """Exception raised when there is not enough disk space."""
@@ -349,52 +327,69 @@ class DownloadItem:
     Platform: str
     Creator: str
     FileSize: Optional[int] = None
-    RetryCount: int = 0
+    RetryCount: int = Config['retries']['max_retries']
 
-class HashManager:
-    """Handles loading and saving cached hashes."""
-    def __init__(self, cache_file: str = 'cached_hashes.json'):
-        self.cache_file = cache_file
-        self.cached_hashes = {}
-        self.LoadCache()
+class CacheManager:
+    """Manages loading, saving and tracking download hashes"""
+    def __init__(self, CacheFile: str = 'cached_hashes.json'):
+        self.CacheFile = CacheFile
+        self.CachedHashes = {}  # Loaded from file
+        self.NewHashes = {}     # New downloads to be saved
+        self.ProcessedHashes = set()  # Successfully completed downloads
 
     def LoadCache(self):
-        """Load cached hashes from the cache file."""
+        """Load existing cache file"""
         try:
-            with open(self.cache_file, 'r') as f:
-                self.cached_hashes = json.load(f)
-                TotalHashes = sum(len(hashes) for platform in self.cached_hashes.values() 
-                                  for hashes in platform.values())
-                Logger.Debug(f"∙ Loaded {TotalHashes} cached hashes")
+            with open(self.CacheFile, 'r') as f:
+                self.CachedHashes = json.load(f)
+                Total = sum(len(Hashes) for Platform in self.CachedHashes.values() 
+                          for Hashes in Platform.values())
+                Logger.Debug(f"∙ Loaded {Total} cached hashes")
         except (FileNotFoundError, json.JSONDecodeError):
-            self.cached_hashes = {}
-            Logger.Debug("∙ No existing cache found, starting fresh")
+            self.CachedHashes = {}
+            Logger.Debug("∙ No existing cache found")
 
-    def SaveHashes(self, new_hashes: Dict[str, Dict[str, list[str]]]):
-        """Save new hashes to the cache file."""
+    def SaveCache(self):
+        """Save current cache state to file"""
         try:
-            for platform, creators in new_hashes.items():
-                if platform not in self.cached_hashes:
-                    self.cached_hashes[platform] = {}
-                for creator, hashes in creators.items():
-                    if creator not in self.cached_hashes[platform]:
-                        self.cached_hashes[platform][creator] = []
-                    self.cached_hashes[platform][creator].extend(
-                        [h for h in hashes if h not in self.cached_hashes[platform][creator]]
-                    )
-            with open(self.cache_file, 'w') as f:
-                json.dump(self.cached_hashes, f, indent=4)
-            Logger.Debug("∙ Saved new hashes to cache")
-        except Exception as e:
-            Logger.Error(f"Failed to save cache: {e}")
+            # Only save hashes that were successfully processed
+            NewCount = 0
+            for Platform, Creators in self.NewHashes.items():
+                if Platform not in self.CachedHashes:
+                    self.CachedHashes[Platform] = {}
+                    
+                for Creator, Hashes in Creators.items():
+                    if Creator not in self.CachedHashes[Platform]:
+                        self.CachedHashes[Platform][Creator] = []
+                        
+                    # Only add successfully processed hashes
+                    NewHashes = [h for h in Hashes if h in self.ProcessedHashes]
+                    if NewHashes:
+                        self.CachedHashes[Platform][Creator].extend(NewHashes)
+                        NewCount += len(NewHashes)
 
-    def HasHash(self, platform: str, creator: str, file_hash: str) -> bool:
-        """Check if a hash exists in the cache."""
-        return (
-            platform in self.cached_hashes and
-            creator in self.cached_hashes[platform] and
-            file_hash in self.cached_hashes[platform][creator]
-        )
+            if NewCount > 0:
+                with open(self.CacheFile, 'w') as f:
+                    json.dump(self.CachedHashes, f, indent=4)
+                Logger.Debug(f"∙ Saved {NewCount} new hashes to cache")
+            
+        except Exception as e:
+            Logger.Error(f"Failed to save cache: {str(e)}")
+
+    def AddHash(self, Platform: str, Creator: str, FileHash: str):
+        """Track a new successful download"""
+        if Platform not in self.NewHashes:
+            self.NewHashes[Platform] = {}
+        if Creator not in self.NewHashes[Platform]:
+            self.NewHashes[Platform][Creator] = []
+        self.NewHashes[Platform][Creator].append(FileHash)
+        self.ProcessedHashes.add(FileHash)
+
+    def HasHash(self, Platform: str, Creator: str, FileHash: str) -> bool:
+        """Check if hash exists in cache"""
+        return (Platform in self.CachedHashes and
+                Creator in self.CachedHashes[Platform] and
+                FileHash in self.CachedHashes[Platform][Creator])
 
 class AsyncDownloadManager:
     """Handles async downloads with retry logic and progress tracking"""
@@ -402,30 +397,20 @@ class AsyncDownloadManager:
         self.Items = [DownloadItem(FileHash=f[0][0], FileUrl=f[0][1], SavePath=f[0][2], 
                                  Platform=f[1], Creator=f[2]) for f in FileList]
         self.MaxConcurrent = MaxConcurrent
-        self.ProcessedHashes = set()
         self.DryRun = Config.get('dry_run', False)
         self.TotalFiles = len(FileList)
         self.CompletedFiles = 0
         self.FailedFiles = 0
         self.TotalBytes = 0
-        self.NewHashes = {}
         self.Lock = asyncio.Lock()
-        self.HashManager = HashManager()  # Initialize HashManager
-        self.DiskSpaceErrorLogged = False  # Initialize the error flag
+        self.CacheManager = CacheManager()
+        self.DiskSpaceErrorLogged = False
 
     async def Start(self) -> bool:
         try:
             self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
             async with aiohttp.ClientSession() as Session:
-                self.Session = Session
-
-                try:
-                    ProxyType = random.choice(['http', 'socks4', 'socks5'])
-                    self.Session.proxies.update({
-                        ProxyType: random.choice(open(f'proxies/{ProxyType}.txt').read().splitlines())
-                    })
-                except Exception:
-                    pass
+                SetupProxy(Session)
 
                 #Logger.Debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
                 
@@ -449,10 +434,10 @@ class AsyncDownloadManager:
                     TimeRemainingColumn(),
                 ]
 
-                Progress_Bar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console, expand=True)
+                ProgressBar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console, expand=True)
                 
-                with Progress_Bar as progress:
-                    task_id = progress.add_task(
+                with ProgressBar as progress:
+                    TaskId = progress.add_task(
                         "",
                         total=self.TotalFiles,
                         file="Starting...",
@@ -462,36 +447,44 @@ class AsyncDownloadManager:
                     )
 
                     # Create download tasks for all files
-                    tasks = []
-                    for item in self.Items:
-                        if not self.HashManager.HasHash(item.Platform, item.Creator, item.FileHash):
-                            tasks.append(asyncio.create_task(self.DownloadFile(item, progress, task_id)))
+                    Tasks = []
+                    for Item in self.Items:
+                        if not self.CacheManager.HasHash(Item.Platform, Item.Creator, Item.FileHash):
+                            Tasks.append(asyncio.create_task(self.DownloadFile(Item, progress, TaskId)))
                         #else:
-                            #Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
+                            #Logger.Debug(f"∙ Skipping {Item.FileHash} as it is already cached")
                     
-                    if tasks:
-                        await asyncio.gather(*tasks)
+                    if Tasks:
+                        try:
+                            await asyncio.gather(*Tasks)
+                        except asyncio.CancelledError:
+                            # Save cache before propagating cancellation
+                            self.CacheManager.SaveCache()
+                            raise
 
-            self.HashManager.SaveHashes(self.NewHashes)
-            Logger.Debug(f"∙ Saved {sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())} new hashes to cache")
+            # Save cache after successful completion
+            self.CacheManager.SaveCache()
+            SavedCount = sum(len(Hashes) for Platform in self.CacheManager.NewHashes.values() 
+                            for Hashes in Platform.values())
+            Logger.Debug(f"∙ Saved {SavedCount} new hashes to cache")
             return True
             
         except InsufficientDiskSpaceError:
             if not self.DiskSpaceErrorLogged:
                 Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
                 self.DiskSpaceErrorLogged = True
-            self.HashManager.SaveHashes(self.NewHashes)
-            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
-            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
+            self.CacheManager.SaveCache()
+            TotalSaved = sum(len(Hashes) for Platform in self.NewHashes.values() for Hashes in Platform.values())
+            Logger.Debug(f"∙ Saved {TotalSaved} hashes before exiting.")
             return False
         except Exception as Error:
             Logger.Error(f"Download manager encountered an error: {str(Error)}")
-            self.HashManager.SaveHashes(self.NewHashes)
-            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
-            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
+            self.CacheManager.SaveCache()
+            TotalSaved = sum(len(Hashes) for Platform in self.NewHashes.values() for Hashes in Platform.values())
+            Logger.Debug(f"∙ Saved {TotalSaved} hashes before exiting.")
             return False
 
-    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
+    @backoff.on_exception(backoff.expo, Exception, max_tries=Config['retries']['max_retries'],)
     async def DownloadFile(self, Item: DownloadItem, progress, TaskId) -> bool:
         try:
             async with self.Semaphore:
@@ -521,7 +514,7 @@ class AsyncDownloadManager:
                     TempPath = f"{Item.SavePath}.downloading"
                     async with self.Session.get(Item.FileUrl) as Response:
                         if Response.status == 200:
-                            os.makedirs(os.path.dirname(Item.SavePath), exist_ok=True)
+                            os.makedirs(os.path.dirname(Item.SavePath), exist_okay=True)
                             
                             async with aiofiles.open(TempPath, 'wb') as f:
                                 Downloaded = 0
@@ -540,15 +533,8 @@ class AsyncDownloadManager:
                             
                             # Track hash for caching
                             async with self.Lock:
-                                if Item.Platform not in self.NewHashes:
-                                    self.NewHashes[Item.Platform] = {}
-                                if Item.Creator not in self.NewHashes[Item.Platform]:
-                                    self.NewHashes[Item.Platform][Item.Creator] = []
-                                self.NewHashes[Item.Platform][Item.Creator].append(Item.FileHash)
-                                
                                 self.CompletedFiles += 1
-                                self.ProcessedHashes.add(Item.FileHash)
-                                self.TotalBytes += Downloaded
+                                self.CacheManager.ProcessedHashes.add(Item.FileHash)  # Fix reference
                                 progress.update(TaskId, completed=self.CompletedFiles)
 
                             return True
@@ -566,14 +552,17 @@ class AsyncDownloadManager:
                 Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
                 self.DiskSpaceErrorLogged = True
             # Cancel all other tasks
-            for task in asyncio.all_tasks():
-                task.cancel()
+            for Task in asyncio.all_tasks():
+                Task.cancel()
             raise  # Propagate the exception to be handled in Start()
+        except (InsufficientDiskSpaceError, asyncio.CancelledError):
+            raise
         except Exception as Error:
             self.FailedFiles += 1
             if os.path.exists(f"{Item.SavePath}.downloading"):
                 os.remove(f"{Item.SavePath}.downloading")
-            raise Error
+            Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
+            return False
 
     @staticmethod
     def HumanizeBytes(Bytes: int) -> str:
@@ -600,15 +589,7 @@ class Fetcher:
             'user-agent': f'NeoFans/{Config["version"]} (Hyphoduck)'
         })
 
-        try:
-            ProxyType = random.choice(['http', 'socks4', 'socks5'])
-            self.Session.proxies.update({
-                ProxyType: random.choice(open(f'proxies/{ProxyType}.txt').read().splitlines())
-            })
-        except Exception:
-            pass
-
-        #Logger.Debug(f'({ProxyType}) Using proxy {self.Session.proxies[ProxyType]}')
+        SetupProxy(self.Session)
 
         self.Platform = Platform
         self.Id = Id
@@ -621,8 +602,6 @@ class Fetcher:
         self.FilesDownloaded = 0
 
         self.CachedHashes = CachedHashes
-
-        #self.FetcherInstance = FavoriteFetcher('coomer')  # Use shared instance for hash checking
 
         self.Params = None
 
@@ -648,7 +627,49 @@ class Fetcher:
         self.ParamsLimit = self.Params['limit'] if self.Params else 0
         self.Params = urllib.parse.urlencode(self.Params, safe='+') if self.Platform in ['rule34', 'e621'] else self.Params  # Avoid '+' encoding in params
         self.DryRun = Config.get('dry_run', False)
-        self.CacheManager = HashManager()  # Initialize HashManager
+        self.CacheManager = CacheManager()  # Initialize CacheManager
+
+    @staticmethod
+    def ScrapeFavorites(Platform):
+        Url = f'https://{Platform}.su/api/v1/account/favorites?type=artist'
+        Session = requests.Session()
+        Session.headers.update({
+            'accept': 'application/json',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9',
+            'user-agent': 'Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/63.0.3239.84 TV Safari/537.36'
+        })
+
+        Session.cookies.set(
+            'session',
+            os.getenv('COOMER_SESS') if Platform == 'coomer' else os.getenv('KEMONO_SESS'),
+            domain=f'{Platform}.su',
+            path='/'
+        )
+
+        try:
+            Response = Session.get(Url)
+            if Response.status_code == 200:
+                Data = Response.json()
+
+                for Service in ['onlyfans', 'fansly', 'patreon', 'subscribestar', 'fanbox', 'gumroad']:
+                    # Initialize service in Config if needed
+                    if 'ids' not in Config[Service]:
+                        Config[Service]['ids'] = []
+                    if 'names' not in Config[Service]:
+                        Config[Service]['names'] = []
+
+                for Item in Data:
+                    Service = Item.get('service')
+                    CreatorId = Item.get('id')
+                    CreatorName = Item.get('name')
+                    Config[Service]['ids'].append(CreatorId)
+                    Config[Service]['names'].append(CreatorName)
+
+        except Exception as e:
+            Logger.Warning(f"Error fetching favorites: {str(e)}")
+        finally:
+            Session.close()
 
     def ExtractHash(self, Url):  # Extract hash from URL / <hash> .png
         if not Url:
@@ -677,7 +698,7 @@ class Fetcher:
             Logger.Debug(f'∙ {Url}')
         return Urls
 
-    def Scrape(self):
+    def ScrapePlatform(self):
 
         ############################################################
         #                                                          #
@@ -920,8 +941,8 @@ def Main():
             if not Config['enabled_platforms'][Platform]:
                 Config[Platform]['creator_limit'] = 0
 
-        FavoriteFetcher('coomer')  # Fetch favorites from Coomer
-        FavoriteFetcher('kemono')  # Fetch favorites from Kemono
+        Fetcher.ScrapeFavorites('coomer')  # Fetch favorites from Coomer
+        Fetcher.ScrapeFavorites('kemono')  # Fetch favorites from Kemono
 
         for Platform in Config['directory_names'].keys():
             if Platform in ['rule34', 'e621']:
@@ -1011,7 +1032,7 @@ def Main():
                             CachedHashes=Config['cached_hashes'],
                             CreatorLimit=Config[Platform]['creator_limit'],
                             GlobalLimit=Config['global_limit']
-                        ).Scrape()
+                        ).ScrapePlatform()
                         Collection.append(Result)
                         ProgressBar.refresh()
         
