@@ -73,7 +73,7 @@ class ProxyChecker:
         try:
             ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
             async with httpx.AsyncClient(proxies={ProxyType: ProxyUrl}, timeout=self.Timeout) as client:
-                Response = await client.get('http://www.google.com')
+                Response = await client.get('http://8.8.8.8')
                 if Response.status_code == 200:
                     return Proxy
         except httpx.RequestError:
