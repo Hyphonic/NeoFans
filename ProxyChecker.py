@@ -12,7 +12,7 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
-LogLevel = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
+LogLevel = 4  # Disable all logging except for the summary at the end
 
 class RichLogger:
     def __init__(self, name=__name__):
@@ -50,11 +50,11 @@ class RichLogger:
 Logger = RichLogger(__name__)
 
 Screen = r'''
- ______   ______     ______     __  __     __  __        ______     __  __     ______     ______     __  __     ______     ______    
-/\  == \ /\  == \   /\  __ \   /\_\_\_\   /\ \_\ \      /\  ___\   /\ \_\ \   /\  ___\   /\  ___\   /\ \/ /    /\  ___\   /\  == \   
-\ \  _-/ \ \  __<   \ \ \/\ \  \/_/\_\/_  \ \____ \     \ \ \____  \ \  __ \  \ \  __\   \ \ \____  \ \  _"-.  \ \  __\   \ \  __<   
- \ \_\    \ \_\ \_\  \ \_____\   /\_\/\_\  \/\_____\     \ \_____\  \ \_\ \_\  \ \_____\  \ \_____\  \ \_\ \_\  \ \_____\  \ \_\ \_\ 
-  \/_/     \/_/ /_/   \/_____/   \/_/\/_/   \/_____/      \/_____/   \/_/\/_/   \/_____/   \/_____/   \/_/\/_/   \/_____/   \/_/ /_/                                                                                                                      
+ ______   ______     ______     __  __     __  __    
+/\  == \ /\  == \   /\  __ \   /\_\_\_\   /\ \_\ \   
+\ \  _-/ \ \  __<   \ \ \/\ \  \/_/\_\/_  \ \____ \  
+ \ \_\    \ \_\ \_\  \ \_____\   /\_\/\_\  \/\_____\ 
+  \/_/     \/_/ /_/   \/_____/   \/_/\/_/   \/_____/ 
                                                      
 '''
 
@@ -71,7 +71,8 @@ class ProxyChecker:
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
         try:
-            async with httpx.AsyncClient(proxy=Proxy, timeout=self.Timeout) as client:
+            ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
+            async with httpx.AsyncClient(proxies={ProxyType: ProxyUrl}, timeout=self.Timeout) as client:
                 Response = await client.get('http://www.google.com')
                 if Response.status_code == 200:
                     return Proxy
@@ -101,11 +102,8 @@ class ProxyChecker:
         TotalProxies = len(Proxies)
         
         if not Proxies:
-            Logger.warning(f"No proxies to check for {ProxyType} from {Url}")
             return
         
-        Logger.info(f"Checking {TotalProxies} {ProxyType.capitalize()} proxies using {self.MaxWorkers} workers")
-
         WorkingProxies = []
         Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
 
@@ -140,9 +138,8 @@ class ProxyChecker:
             with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
                 File.write('\n'.join(WorkingProxies) + '\n')
         except OSError as E:
-            Logger.error(f"Failed to write working proxies to {ProxyDir}: {E}")
+            pass
 
-        Logger.info(f"∙ Found {len(WorkingProxies)} working {ProxyType} proxies out of {TotalProxies}")
         self.TotalProxiesChecked += TotalProxies
         self.WorkingProxiesFound += len(WorkingProxies)
 
