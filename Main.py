@@ -513,25 +513,46 @@ class AsyncDownloadManager:
             Bytes /= 1024
 
     async def SaveNewHashes(self):
+        """Save successfully downloaded file hashes to cache"""
         try:
-            async with aiofiles.open('cached_hashes.json', 'r') as f:
-                Content = await f.read()
-                CachedHashes = json.loads(Content)
-        except (FileNotFoundError, json.JSONDecodeError):
-            CachedHashes = {}
-            
-        # Update cache with new hashes
-        for Platform in self.NewHashes:
-            if Platform not in CachedHashes:
-                CachedHashes[Platform] = {}
-            for Creator in self.NewHashes[Platform]:
-                if Creator not in CachedHashes[Platform]:
-                    CachedHashes[Platform][Creator] = []
-                CachedHashes[Platform][Creator].extend(self.NewHashes[Platform][Creator])
-                CachedHashes[Platform][Creator] = list(set(CachedHashes[Platform][Creator]))
+            # Load existing cache
+            try:
+                async with aiofiles.open('cached_hashes.json', 'r') as f:
+                    Content = await f.read()
+                    CachedHashes = json.loads(Content)
+                    Logger.Debug(f"∙ Loaded existing cache with {sum(len(hashes) for platform in CachedHashes.values() for creator, hashes in platform.items())} hashes")
+            except (FileNotFoundError, json.JSONDecodeError):
+                CachedHashes = {}
+                Logger.Debug("∙ No existing cache found, creating new")
+                
+            # Add new successful download hashes
+            NewHashCount = 0
+            for Platform, CreatorData in self.NewHashes.items():
+                if Platform not in CachedHashes:
+                    CachedHashes[Platform] = {}
+                    
+                for Creator, Hashes in CreatorData.items():
+                    if Creator not in CachedHashes[Platform]:
+                        CachedHashes[Platform][Creator] = []
+                    
+                    # Only add hashes from successful downloads
+                    NewHashes = [Hash for Hash in Hashes if Hash in self.ProcessedHashes]
+                    CachedHashes[Platform][Creator].extend(NewHashes)
+                    
+                    # Remove duplicates while preserving order
+                    CachedHashes[Platform][Creator] = list(dict.fromkeys(CachedHashes[Platform][Creator]))
+                    NewHashCount += len(NewHashes)
 
-        async with aiofiles.open('cached_hashes.json', 'w') as f:
-            await f.write(json.dumps(CachedHashes, indent=4))
+            # Save updated cache
+            if NewHashCount > 0:
+                async with aiofiles.open('cached_hashes.json', 'w') as f:
+                    await f.write(json.dumps(CachedHashes, indent=4))
+                    Logger.Debug(f"∙ Saved {NewHashCount} new hashes to cache")
+            else:
+                Logger.Debug("∙ No new hashes to save")
+
+        except Exception as Error:
+            Logger.Error(f"Failed to save cache: {str(Error)}")
 
 ############################################################
 #                                                          #
