@@ -76,7 +76,7 @@ class ProxyChecker:
             else:
                 ProxyUrl = f"{ProxyType}://{Proxy}"  # For SOCKS, use socks5://host:port format
 
-            async with httpx.AsyncClient(proxies={ProxyType: ProxyUrl}, timeout=self.Timeout) as client:
+            async with httpx.AsyncClient(proxy={ProxyType: ProxyUrl}, timeout=self.Timeout) as client:
                 Response = await client.get('http://8.8.8.8')
                 if Response.status_code == 200:
                     return Proxy
