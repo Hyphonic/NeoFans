@@ -753,9 +753,9 @@ async def Main():
         Collection.extend(Results)
 
         Results = await asyncio.gather(*Tasks)
-        Collection.extend(Results)
+        Collection = Results  # Direct assignment instead of extend
 
-        if Collection: # 4 for-loops. I don't even know...
+        if Collection:  # Process results
             AllFiles = []
             for Result in Collection:
                 if Result and isinstance(Result, tuple) and len(Result) == 2:
@@ -766,7 +766,7 @@ async def Main():
                             for FileData in Files:
                                 if isinstance(FileData, list) and len(FileData) == 3:
                                     AllFiles.append((FileData, Platform, Creator))
-                        
+            
             if AllFiles:
                 Downloader = AsyncDownloadManager(AllFiles)
                 Result = await Downloader.Start()
