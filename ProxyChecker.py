@@ -3,6 +3,7 @@ from rich.console import Console
 import httpx
 import time
 import os
+import aiofiles
 import asyncio
 from rich.progress import (
     BarColumn,
@@ -68,19 +69,33 @@ class ProxyChecker:
         self.TotalProxiesChecked = 0
         self.WorkingProxiesFound = 0
         self.Client = httpx.AsyncClient()
+        self.Semaphore = asyncio.Semaphore(self.MaxWorkers)
+        self.TestUrls = [
+            'http://www.google.com',
+        ]
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
-        try:
-            if ProxyType in ["http", "https"]:
-                ProxyUrl = Proxy  # For HTTP/HTTPS, use host:port format
-            else:
-                ProxyUrl = f"{ProxyType}://{Proxy}"  # For SOCKS, use socks5://host:port format
+        async with self.Semaphore:  # Limit concurrent connections
+            for TestUrl in self.TestUrls:
+                try:
+                    if ProxyType in ["http", "https"]:
+                        ProxyUrl = f"http://{Proxy}"
+                    else:
+                        ProxyUrl = f"{ProxyType}://{Proxy}"
 
-            async with httpx.AsyncClient(proxy={ProxyType: ProxyUrl}, timeout=self.Timeout) as client:
-                Response = await client.get('http://8.8.8.8')
-                if Response.status_code == 200:
-                    return Proxy
-        except httpx.RequestError:
+                    async with httpx.AsyncClient(
+                        proxy=ProxyUrl,
+                        timeout=self.Timeout,
+                        follow_redirects=True
+                    ) as Client:
+                        Start = time.time()
+                        Response = await Client.get(TestUrl)
+                        End = time.time()
+                        
+                        if Response.status_code == 200 and (End - Start) < self.Timeout:
+                            return Proxy
+                except Exception:
+                    continue
             return None
 
     async def GetProxies(self, Url: str) -> List[str]:
@@ -102,49 +117,59 @@ class ProxyChecker:
     async def ProcessProxies(self, ProxyType: str, Url: str) -> None:
         ProxyDir = f'proxies/{ProxyType}.txt'
         self.CreateProxyDir(os.path.dirname(ProxyDir))
-        Proxies = await self.GetProxies(Url)
-        TotalProxies = len(Proxies)
         
-        if not Proxies:
-            return
-        
-        WorkingProxies = []
-        Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
-
-        ProgressColumns = [
-            TextColumn("{task.fields[proxy_type]}"),
-            BarColumn(bar_width=None),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("•"),
-            TextColumn("[blue]{task.fields[proxy]}"),
-            TextColumn("•"),
-            MofNCompleteColumn(),
-            TextColumn("•"),
-            TimeRemainingColumn(),
-        ]
-
-        with Progress(*ProgressColumns, console=Logger.Console, auto_refresh=True, expand=True) as progress:
-            task_id = progress.add_task(
-                "Checking proxies",
-                total=TotalProxies,
-                proxy_type=ProxyType.capitalize(),
-                proxy="Starting..."
-            )
-
-            for Task in asyncio.as_completed(Tasks):
-                Result = await Task
-                if Result:
-                    WorkingProxies.append(Result)
-                progress.update(task_id, advance=1, proxy=Result if Result else "Failed")
-
         try:
-            with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
-                File.write('\n'.join(WorkingProxies) + '\n')
-        except OSError as E:
-            pass
+            Proxies = await self.GetProxies(Url)
+            if not Proxies:
+                return
 
-        self.TotalProxiesChecked += TotalProxies
-        self.WorkingProxiesFound += len(WorkingProxies)
+            WorkingProxies = []
+            BatchSize = 50  # Process proxies in batches
+            
+            # Create progress bar
+            ProgressColumns = [
+                TextColumn("{task.fields[proxy_type]}"),
+                BarColumn(bar_width=None),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TextColumn("•"),
+                TextColumn("[blue]{task.fields[proxy]}"),
+                TextColumn("•"),
+                MofNCompleteColumn(),
+                TextColumn("•"),
+                TimeRemainingColumn(),
+            ]
+
+            with Progress(*ProgressColumns, console=Logger.Console, auto_refresh=False, expand=True) as progress:
+                task_id = progress.add_task(
+                    "Checking proxies",
+                    total=len(Proxies),
+                    proxy_type=ProxyType.capitalize(),
+                    proxy="Starting..."
+                )
+
+                # Process in batches
+                for i in range(0, len(Proxies), BatchSize):
+                    Batch = Proxies[i:i + BatchSize]
+                    Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Batch]
+                    
+                    Results = await asyncio.gather(*Tasks, return_exceptions=True)
+                    
+                    for Result in Results:
+                        if isinstance(Result, str):  # Valid proxy
+                            WorkingProxies.append(Result)
+                        progress.update(task_id, advance=1, proxy=Result if isinstance(Result, str) else "Failed")
+                        progress.refresh()
+
+            # Save working proxies
+            if WorkingProxies:
+                async with aiofiles.open(ProxyDir, 'a') as File:
+                    await File.write('\n'.join(WorkingProxies) + '\n')
+
+            self.TotalProxiesChecked += len(Proxies)
+            self.WorkingProxiesFound += len(WorkingProxies)
+            
+        except Exception as E:
+            Logger.error(f"Error processing {ProxyType} proxies: {str(E)}")
 
     async def Run(self) -> None:
         StartTime = time.time()
