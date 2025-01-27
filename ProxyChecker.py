@@ -72,10 +72,12 @@ class ProxyChecker:
         self.Semaphore = asyncio.Semaphore(self.MaxWorkers)
         self.TestUrls = [
             'http://www.google.com',
+            'http://www.cloudflare.com'  # Add backup test URL
         ]
+        Logger.info(f"Initialized with {MaxWorkers} concurrent workers")  # Add logging
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
-        async with self.Semaphore:  # Limit concurrent connections
+        async with self.Semaphore:  # This limits concurrent connections
             for TestUrl in self.TestUrls:
                 try:
                     if ProxyType in ["http", "https"]:
@@ -84,7 +86,7 @@ class ProxyChecker:
                         ProxyUrl = f"{ProxyType}://{Proxy}"
 
                     async with httpx.AsyncClient(
-                        proxy=ProxyUrl,
+                        proxy=ProxyUrl,  # Fix proxy configuration
                         timeout=self.Timeout,
                         follow_redirects=True
                     ) as Client:
@@ -93,8 +95,10 @@ class ProxyChecker:
                         End = time.time()
                         
                         if Response.status_code == 200 and (End - Start) < self.Timeout:
+                            Logger.debug(f"Working proxy found: {Proxy}")  # Add debug logging
                             return Proxy
-                except Exception:
+                except Exception as e:
+                    Logger.debug(f"Proxy failed: {Proxy} - {str(e)}")  # Add debug logging
                     continue
             return None
 

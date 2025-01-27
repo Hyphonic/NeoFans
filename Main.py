@@ -80,7 +80,11 @@ class RichLogger:
 
 Logger = RichLogger(__name__)
 
-Config = aiofiles.open('config.json', 'r').read()
+async def ReadConfig():
+    async with aiofiles.open('config.json', 'r') as f:
+        return json.loads(await f.read())
+
+Config = asyncio.run(ReadConfig())
 
 class FavoriteFetcher:
     def __init__(self, Platform):
