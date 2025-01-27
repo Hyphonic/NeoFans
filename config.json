@@ -194,5 +194,6 @@
 "dry_run": true,
 "platform_limit_debug": 1,
 "cached_hashes": {},
-"version": "3.0.1"
+"version": "3.0.2",
+"proxy_max_workers": 125
 }

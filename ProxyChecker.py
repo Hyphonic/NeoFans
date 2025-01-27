@@ -3,6 +3,7 @@ from rich.console import Console
 import httpx
 import time
 import os
+import json
 import aiofiles
 import asyncio
 from rich.progress import (
@@ -49,6 +50,12 @@ class RichLogger:
             self.Console.log(f"[bold red]ERROR:   [/bold red] {message}")
 
 Logger = RichLogger(__name__)
+
+async def ReadConfig():
+    async with aiofiles.open('config.json', 'r') as f:
+        return json.loads(await f.read())
+
+Config = asyncio.run(ReadConfig())
 
 Screen = r'''
  ______   ______     ______     __  __     __  __    
@@ -128,7 +135,7 @@ class ProxyChecker:
                 return
 
             WorkingProxies = []
-            BatchSize = 50  # Process proxies in batches
+            BatchSize = 200  # Process proxies in batches
             
             # Create progress bar
             ProgressColumns = [
@@ -208,7 +215,7 @@ if __name__ == "__main__":
         ]
     }
     Console(force_terminal=True).print(Screen)
-    Checker = ProxyChecker(ProxyUrls, MaxWorkers=100)  # Limit the number of workers to reduce memory usage
+    Checker = ProxyChecker(ProxyUrls, MaxWorkers=Config['proxy_max_workers'])  # Limit the number of workers to reduce memory usage
     asyncio.run(Checker.Run())
 
         # "socks4": [
