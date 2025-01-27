@@ -752,20 +752,27 @@ async def Main():
         Results = await asyncio.gather(*Tasks)
         Collection.extend(Results)
 
+        Results = await asyncio.gather(*Tasks)
+        Collection.extend(Results)
+
         if Collection:
             AllFiles = []
             for Result in Collection:
-                for Platform in Result:
-                    for Creator in Result[Platform]:
-                        AllFiles.extend([(FileData, Platform, Creator) for FileData in Result[Platform][Creator]])
+                if Result and isinstance(Result, tuple) and len(Result) == 2:
+                    GlobalLimit, ResultData = Result
+                    for Platform in ResultData:
+                        for Creator in ResultData[Platform]:
+                            Files = ResultData[Platform][Creator]
+                            for FileData in Files:
+                                if isinstance(FileData, list) and len(FileData) == 3:
+                                    AllFiles.append((FileData, Platform, Creator))
                         
             if AllFiles:
-                # Use asyncio.run to start the async download manager
                 Downloader = AsyncDownloadManager(AllFiles)
-                result = await Downloader.Start()
-                if not result:
+                Result = await Downloader.Start()
+                if not Result:
                     Logger.Debug("∙ Hashes have been saved before exiting.")
-                    return  # Exit gracefully without an error code
+                    return
 
     except KeyboardInterrupt:
         Logger.Warning("Interrupted by user")
