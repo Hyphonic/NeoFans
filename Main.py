@@ -755,7 +755,7 @@ async def Main():
         Results = await asyncio.gather(*Tasks)
         Collection.extend(Results)
 
-        if Collection:
+        if Collection: # 4 for-loops. I don't even know...
             AllFiles = []
             for Result in Collection:
                 if Result and isinstance(Result, tuple) and len(Result) == 2:
