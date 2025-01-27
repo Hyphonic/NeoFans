@@ -123,7 +123,7 @@ class ProxyChecker:
             TimeRemainingColumn(),
         ]
 
-        with Progress(*ProgressColumns, console=Logger.Console, auto_refresh=False, expand=True) as progress:
+        with Progress(*ProgressColumns, console=Logger.Console, auto_refresh=True, expand=True) as progress:
             task_id = progress.add_task(
                 "Checking proxies",
                 total=TotalProxies,
@@ -136,7 +136,6 @@ class ProxyChecker:
                 if Result:
                     WorkingProxies.append(Result)
                 progress.update(task_id, advance=1, proxy=Result if Result else "Failed")
-                progress.refresh()
 
         try:
             with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
