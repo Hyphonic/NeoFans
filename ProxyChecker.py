@@ -71,9 +71,8 @@ class ProxyChecker:
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
         try:
-            #ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
-            Proxy.replace(f'{ProxyType}://', '')
-            async with httpx.AsyncClient(proxy=Proxy, timeout=self.Timeout) as client:
+            ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
+            async with httpx.AsyncClient(proxy=ProxyUrl, timeout=self.Timeout) as client:
                 Response = await client.get('http://8.8.8.8')
                 if Response.status_code == 200:
                     return Proxy
@@ -171,10 +170,6 @@ if __name__ == "__main__":
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
             "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt"
         ],
-        "socks4": [
-            "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
-            "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt"
-        ],
         "socks5": [
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
             "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt"
@@ -183,3 +178,8 @@ if __name__ == "__main__":
     Console(force_terminal=True).print(Screen)
     Checker = ProxyChecker(ProxyUrls, MaxWorkers=150)
     asyncio.run(Checker.Run())
+
+        # "socks4": [
+        #     "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
+        #     "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt"
+        # ],
