@@ -172,7 +172,7 @@ Config = {
             'newgenai', 'alluring-artwork', 'killjoyproject', 'trixie_tang', '3derotica', 'macklesternsfw', 'krauswnori',
             'borvar', 'xiiirockiiix', 'a1exwell', 'mrveryoliveoil', 'zoulihd', 'vexingvenery', 'quick_e', 'thecoomjurer',
             'blenderanon_', 'sunk118', 'trist_ava', 'zux_edits', 'lewdneeko', 'thefoxxx', 'kitedout', 'bloo3d',
-            'weedson86', 'meat_master', 'kumbhker', 'thefastestgman', 'shibarademu', 'lexy_3d', 'zyx3dx', 'user:Myth1c',
+            'weedson86', 'meat_master', 'kumbhker', 'thefastestgman', 'shibarademu', 'lexy_3d', 'zyx3d', 'user:Myth1c',
             'currysfm', 'fatcat17', 'pixel3d', 'nokeb', 'kanna+nyotengu', 'rumbleperv', 'zis2nsfw', 'jvfemdom',
             'missally', 'emini_ruru', 'elklordart', 'onagi', 'mhpwrestling', 'bai3d', 'sentinel1_4', 'chadrat',
             'jojozz', 'raviana_brwl', 'klodow', 'toasted_microwave', 'nithes', 'creationmach1ne', 'hobossy', 'bigzbig',
@@ -328,19 +328,6 @@ class FavoriteFetcher:
 #                                                          #
 ############################################################
 
-async def LoadCache():
-    """Load cached hashes asynchronously"""
-    try:
-        async with aiofiles.open('cached_hashes.json', 'r') as f:
-            Content = await f.read()
-            Config['cached_hashes'] = json.loads(Content)
-            TotalHashes = sum(len(Hashes) for Platform in Config['cached_hashes'].values() 
-                               for Hashes in Platform.values())
-            Logger.Debug(f"∙ Loaded {TotalHashes} cached hashes")
-    except (FileNotFoundError, json.JSONDecodeError):
-        Config['cached_hashes'] = {}
-        Logger.Debug("∙ No existing cache found, starting fresh")
-
 async def CheckDiskSpace(RequiredBytes: int = 5e+9) -> bool:
     """Check if sufficient disk space is available"""
     if shutil.disk_usage('/').free < RequiredBytes:
@@ -359,6 +346,51 @@ class DownloadItem:
     FileSize: Optional[int] = None
     RetryCount: int = 0
 
+class HashManager:
+    """Handles loading and saving cached hashes."""
+    def __init__(self, cache_file: str = 'cached_hashes.json'):
+        self.cache_file = cache_file
+        self.cached_hashes = {}
+        self.LoadCache()
+
+    def LoadCache(self):
+        """Load cached hashes from the cache file."""
+        try:
+            with open(self.cache_file, 'r') as f:
+                self.cached_hashes = json.load(f)
+                TotalHashes = sum(len(hashes) for platform in self.cached_hashes.values() 
+                                  for hashes in platform.values())
+                Logger.Debug(f"∙ Loaded {TotalHashes} cached hashes")
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.cached_hashes = {}
+            Logger.Debug("∙ No existing cache found, starting fresh")
+
+    def SaveHashes(self, new_hashes: Dict[str, Dict[str, list[str]]]):
+        """Save new hashes to the cache file."""
+        try:
+            for platform, creators in new_hashes.items():
+                if platform not in self.cached_hashes:
+                    self.cached_hashes[platform] = {}
+                for creator, hashes in creators.items():
+                    if creator not in self.cached_hashes[platform]:
+                        self.cached_hashes[platform][creator] = []
+                    self.cached_hashes[platform][creator].extend(
+                        [h for h in hashes if h not in self.cached_hashes[platform][creator]]
+                    )
+            with open(self.cache_file, 'w') as f:
+                json.dump(self.cached_hashes, f, indent=4)
+            Logger.Debug("∙ Saved new hashes to cache")
+        except Exception as e:
+            Logger.Error(f"Failed to save cache: {e}")
+
+    def HasHash(self, platform: str, creator: str, file_hash: str) -> bool:
+        """Check if a hash exists in the cache."""
+        return (
+            platform in self.cached_hashes and
+            creator in self.cached_hashes[platform] and
+            file_hash in self.cached_hashes[platform][creator]
+        )
+
 class AsyncDownloadManager:
     """Handles async downloads with retry logic and progress tracking"""
     def __init__(self, FileList: list, MaxConcurrent: int = 32):
@@ -373,6 +405,7 @@ class AsyncDownloadManager:
         self.TotalBytes = 0
         self.NewHashes = {}
         self.Lock = asyncio.Lock()
+        self.HashManager = HashManager()  # Initialize HashManager
 
     async def Start(self) -> bool:
         try:
@@ -415,13 +448,15 @@ class AsyncDownloadManager:
                     # Create download tasks for all files
                     tasks = []
                     for item in self.Items:
-                        if item.FileHash not in self.ProcessedHashes:
+                        if not self.HashManager.HasHash(item.Platform, item.Creator, item.FileHash):
                             tasks.append(self.DownloadFile(item, progress, task_id))
+                        else:
+                            Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
                     
                     if tasks:
                         await asyncio.gather(*tasks)
 
-            await self.SaveNewHashes()
+            self.HashManager.SaveHashes(self.NewHashes)
             return True
             
         except Exception as Error:
@@ -512,51 +547,6 @@ class AsyncDownloadManager:
                 return f"{Bytes:.2f} {Unit}"
             Bytes /= 1024
 
-    async def SaveNewHashes(self):
-        """Save successfully downloaded file hashes to cache"""
-        try:
-            # Load existing cache
-            try:
-                async with aiofiles.open('cached_hashes.json', 'r') as f:
-                    Content = await f.read()
-                    CachedHashes = json.loads(Content)
-            except (FileNotFoundError, json.JSONDecodeError):
-                CachedHashes = {}
-                Logger.Debug("∙ Creating new cache file")
-            
-            # Add new successful download hashes
-            NewHashCount = 0
-            for Platform, CreatorData in self.NewHashes.items():
-                # Initialize platform dict if needed
-                if Platform not in CachedHashes:
-                    CachedHashes[Platform] = {}
-                    
-                for Creator, Hashes in CreatorData.items():
-                    # Initialize creator array if needed 
-                    if Creator not in CachedHashes[Platform]:
-                        CachedHashes[Platform][Creator] = []
-                    
-                    # Only add hashes that were successfully processed
-                    NewHashes = []
-                    for Hash in Hashes:
-                        if Hash in self.ProcessedHashes and Hash not in CachedHashes[Platform][Creator]:
-                            NewHashes.append(Hash)
-                            NewHashCount += 1
-                    
-                    # Extend creator's hash list with new unique hashes
-                    CachedHashes[Platform][Creator].extend(NewHashes)
-
-            # Save updated cache if we have new hashes
-            if NewHashCount > 0:
-                async with aiofiles.open('cached_hashes.json', 'w') as f:
-                    await f.write(json.dumps(CachedHashes, indent=4))
-                    Logger.Debug(f"∙ Saved {NewHashCount} new hashes to cache")
-            else:
-                Logger.Debug("∙ No new hashes to save")
-
-        except Exception as Error:
-            Logger.Error(f"Failed to save cache: {str(Error)}")
-
 ############################################################
 #                                                          #
 #                         Fetcher                          #
@@ -623,6 +613,7 @@ class Fetcher:
         self.ParamsLimit = self.Params['limit'] if self.Params else 0
         self.Params = urllib.parse.urlencode(self.Params, safe='+') if self.Platform in ['rule34', 'e621'] else self.Params  # Avoid '+' encoding in params
         self.DryRun = Config.get('dry_run', False)
+        self.CacheManager = HashManager()  # Initialize HashManager
 
     def ExtractHash(self, Url):  # Extract hash from URL / <hash> .png
         if not Url:
@@ -678,7 +669,8 @@ class Fetcher:
                                 FileUrl = Post.get('file_url')
                                 FileHash = self.ExtractHash(FileUrl)
 
-                                if FileHash and FileHash in self.CachedHashes:
+                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
+                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -736,7 +728,8 @@ class Fetcher:
                                     continue
                                     
                                 FileHash = self.ExtractHash(FileUrl)
-                                if FileHash and FileHash in self.CachedHashes:
+                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
+                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -787,7 +780,11 @@ class Fetcher:
                                 FileUrl = f'https://{Hoster}.su{Attachment.get("path")}'
                                 FileHash = self.ExtractHash(FileUrl)
                                 
-                                if FileHash and FileHash not in self.CachedHashes:
+                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
+                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    continue
+
+                                if FileHash:
                                     #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
@@ -802,7 +799,11 @@ class Fetcher:
                                 FileUrl = f'https://{Hoster}.su{File.get("path")}'
                                 FileHash = self.ExtractHash(FileUrl)
                                 
-                                if FileHash and FileHash not in self.CachedHashes:
+                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
+                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    continue
+
+                                if FileHash:
                                     #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
@@ -875,9 +876,6 @@ Screen = rf'''
 def Main():
     Console(force_terminal=True).print(Screen)
     try:
-        # Load cache first
-        asyncio.run(LoadCache())
-        
         InitialGlobalLimit = Config['global_limit']
 
         CheckForDuplicateIds()
