@@ -64,7 +64,7 @@ class ProxyChecker:
         self.Timeout = Timeout
         self.MaxRetries = MaxRetries
         self.RetryDelay = RetryDelay
-        self.MaxWorkers = MaxWorkers
+        self.MaxWorkers = min(MaxWorkers, 50)  # Limit the number of workers to reduce memory usage
         self.TotalProxiesChecked = 0
         self.WorkingProxiesFound = 0
         self.Client = httpx.AsyncClient()
@@ -176,7 +176,7 @@ if __name__ == "__main__":
         ]
     }
     Console(force_terminal=True).print(Screen)
-    Checker = ProxyChecker(ProxyUrls, MaxWorkers=150)
+    Checker = ProxyChecker(ProxyUrls, MaxWorkers=50)  # Limit the number of workers to reduce memory usage
     asyncio.run(Checker.Run())
 
         # "socks4": [
