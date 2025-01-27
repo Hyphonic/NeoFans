@@ -71,8 +71,9 @@ class ProxyChecker:
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
         try:
-            ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
-            async with httpx.AsyncClient(proxy=ProxyUrl, timeout=self.Timeout) as client:
+            #ProxyUrl = Proxy if "://" in Proxy else f"{ProxyType}://{Proxy}"
+            Proxy.replace(f'{ProxyType}://', '')
+            async with httpx.AsyncClient(proxy=Proxy, timeout=self.Timeout) as client:
                 Response = await client.get('http://8.8.8.8')
                 if Response.status_code == 200:
                     return Proxy
