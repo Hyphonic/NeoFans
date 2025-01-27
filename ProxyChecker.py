@@ -204,7 +204,7 @@ if __name__ == "__main__":
         ]
     }
     Console(force_terminal=True).print(Screen)
-    Checker = ProxyChecker(ProxyUrls, MaxWorkers=50)  # Limit the number of workers to reduce memory usage
+    Checker = ProxyChecker(ProxyUrls, MaxWorkers=100)  # Limit the number of workers to reduce memory usage
     asyncio.run(Checker.Run())
 
         # "socks4": [
