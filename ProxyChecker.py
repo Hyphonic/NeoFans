@@ -1,9 +1,9 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict
 from rich.console import Console
-import requests
+import httpx
 import time
 import os
+import asyncio
 
 LogLevel = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -60,28 +60,26 @@ class ProxyChecker:
         self.MaxWorkers = MaxWorkers
         self.TotalProxiesChecked = 0
         self.WorkingProxiesFound = 0
-        self.Session = requests.Session()
+        self.Client = httpx.AsyncClient()
 
-    def CheckProxy(self, Proxy: str) -> Optional[str]:
+    async def CheckProxy(self, Proxy: str) -> Optional[str]:
         try:
-            Session = requests.Session()
-            Session.proxies = {'http': Proxy, 'https': Proxy}
-            Response = Session.get('http://www.google.com', timeout=self.Timeout)
-            if Response.status_code == 200:
-                return Proxy
-        except requests.RequestException:
+            async with httpx.AsyncClient(proxies={'http://': Proxy, 'https://': Proxy}, timeout=self.Timeout) as client:
+                Response = await client.get('http://www.google.com')
+                if Response.status_code == 200:
+                    return Proxy
+        except httpx.RequestError:
             return None
 
-    def GetProxies(self, Url: str) -> List[str]:
+    async def GetProxies(self, Url: str) -> List[str]:
         for Attempt in range(self.MaxRetries):
             try:
-                Response = self.Session.get(Url, timeout=self.Timeout)
+                Response = await self.Client.get(Url)
                 Response.raise_for_status()
-                #Logger.info(f"∙ Successfully fetched proxies from {Url}")
                 return Response.text.strip().splitlines()
-            except requests.RequestException as E:
+            except httpx.RequestError as E:
                 Logger.warning(f"∙ Attempt {Attempt + 1} failed to retrieve proxies from {Url}: {E}")
-                time.sleep(self.RetryDelay)
+                await asyncio.sleep(self.RetryDelay)
         Logger.error(f"Failed to retrieve proxies from {Url} after {self.MaxRetries} attempts")
         return []
 
@@ -89,10 +87,10 @@ class ProxyChecker:
     def CreateProxyDir(Directory: str) -> None:
         os.makedirs(Directory, exist_ok=True)
 
-    def ProcessProxies(self, ProxyType: str, Url: str) -> None:
+    async def ProcessProxies(self, ProxyType: str, Url: str) -> None:
         ProxyDir = f'proxies/{ProxyType}.txt'
         self.CreateProxyDir(os.path.dirname(ProxyDir))
-        Proxies = self.GetProxies(Url)
+        Proxies = await self.GetProxies(Url)
         TotalProxies = len(Proxies)
         
         if not Proxies:
@@ -102,12 +100,11 @@ class ProxyChecker:
         Logger.info(f"Checking {TotalProxies} {ProxyType} proxies from {Url} using {self.MaxWorkers} workers")
 
         WorkingProxies = []
-        with ThreadPoolExecutor(max_workers=self.MaxWorkers) as Executor:
-            Futures = {Executor.submit(self.CheckProxy, Proxy): Proxy for Proxy in Proxies}
-            for Future in as_completed(Futures):
-                Result = Future.result()
-                if Result:
-                    WorkingProxies.append(Result)
+        Tasks = [self.CheckProxy(Proxy) for Proxy in Proxies]
+        for Task in asyncio.as_completed(Tasks):
+            Result = await Task
+            if Result:
+                WorkingProxies.append(Result)
 
         try:
             with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
@@ -119,17 +116,19 @@ class ProxyChecker:
         self.TotalProxiesChecked += TotalProxies
         self.WorkingProxiesFound += len(WorkingProxies)
 
-    def Run(self) -> None:
+    async def Run(self) -> None:
         StartTime = time.time()
         
         try:
+            Tasks = []
             for ProxyType, Urls in self.ProxyUrls.items():
                 for Url in Urls:
-                    self.ProcessProxies(ProxyType, Url)
+                    Tasks.append(self.ProcessProxies(ProxyType, Url))
+            await asyncio.gather(*Tasks)
         except KeyboardInterrupt:
             Logger.warning("Process interrupted by user")
         finally:
-            self.Session.close()
+            await self.Client.aclose()
 
         EndTime = time.time()
         ExecutionTime = EndTime - StartTime
@@ -155,4 +154,4 @@ if __name__ == "__main__":
     }
     Console(force_terminal=True).print(Screen)
     Checker = ProxyChecker(ProxyUrls, MaxWorkers=150)
-    Checker.Run()
+    asyncio.run(Checker.Run())
