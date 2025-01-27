@@ -1,5 +1,4 @@
 rich
-httpx
 aiohttp
 aiofiles
 python-dotenv
