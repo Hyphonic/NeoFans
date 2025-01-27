@@ -279,7 +279,8 @@ Config = {
     'dry_run': Parser.parse_args().dry_run,
     'platform_limit_debug': 1,
     'cached_hashes': {},  # Initialize cached_hashes
-    'version': '3.0.1'
+    'version': '3.0.2',
+    'disk_space': 5e+9  # 5 GB
 }
 
 class FavoriteFetcher:
@@ -332,7 +333,7 @@ class InsufficientDiskSpaceError(Exception):
     """Exception raised when there is not enough disk space."""
     pass
 
-async def CheckDiskSpace(RequiredBytes: int = 5e+9) -> bool:
+async def CheckDiskSpace(RequiredBytes: int = Config['disk_space']) -> bool:
     """Check if sufficient disk space is available"""
     if shutil.disk_usage('/').free < RequiredBytes:
         Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
@@ -410,6 +411,7 @@ class AsyncDownloadManager:
         self.NewHashes = {}
         self.Lock = asyncio.Lock()
         self.HashManager = HashManager()  # Initialize HashManager
+        self.DiskSpaceErrorLogged = False  # Initialize the error flag
 
     async def Start(self) -> bool:
         try:
@@ -453,7 +455,7 @@ class AsyncDownloadManager:
                     tasks = []
                     for item in self.Items:
                         if not self.HashManager.HasHash(item.Platform, item.Creator, item.FileHash):
-                            tasks.append(self.DownloadFile(item, progress, task_id))
+                            tasks.append(asyncio.create_task(self.DownloadFile(item, progress, task_id)))
                         else:
                             Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
                     
@@ -465,7 +467,9 @@ class AsyncDownloadManager:
             return True
             
         except InsufficientDiskSpaceError:
-            Logger.Error("Insufficient disk space encountered.")
+            if not self.DiskSpaceErrorLogged:
+                Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
+                self.DiskSpaceErrorLogged = True
             self.HashManager.SaveHashes(self.NewHashes)
             total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
             Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
@@ -548,6 +552,12 @@ class AsyncDownloadManager:
                     return False
 
         except InsufficientDiskSpaceError:
+            if not self.DiskSpaceErrorLogged:
+                Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
+                self.DiskSpaceErrorLogged = True
+            # Cancel all other tasks
+            for task in asyncio.all_tasks():
+                task.cancel()
             raise  # Propagate the exception to be handled in Start()
         except Exception as Error:
             self.FailedFiles += 1
