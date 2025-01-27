@@ -64,7 +64,7 @@ class ProxyChecker:
 
     async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
         try:
-            async with httpx.AsyncClient(proxies={ProxyType: Proxy}, timeout=self.Timeout) as client:
+            async with httpx.AsyncClient(proxy=Proxy, timeout=self.Timeout) as client:
                 Response = await client.get('http://www.google.com')
                 if Response.status_code == 200:
                     return Proxy
