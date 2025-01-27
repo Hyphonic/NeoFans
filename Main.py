@@ -448,7 +448,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -507,7 +507,7 @@ class Fetcher:
                                     
                                 FileHash = self.ExtractHash(FileUrl)
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -559,7 +559,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
@@ -578,7 +578,7 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
                                 
                                 if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
                                     continue
 
                                 if FileHash:
