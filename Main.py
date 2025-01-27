@@ -328,11 +328,15 @@ class FavoriteFetcher:
 #                                                          #
 ############################################################
 
+class InsufficientDiskSpaceError(Exception):
+    """Exception raised when there is not enough disk space."""
+    pass
+
 async def CheckDiskSpace(RequiredBytes: int = 5e+9) -> bool:
     """Check if sufficient disk space is available"""
     if shutil.disk_usage('/').free < RequiredBytes:
         Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
-        return False
+        raise InsufficientDiskSpaceError("Not enough disk space to continue.")
     return True
 
 @dataclass
@@ -459,16 +463,20 @@ class AsyncDownloadManager:
             self.HashManager.SaveHashes(self.NewHashes)
             return True
             
+        except InsufficientDiskSpaceError:
+            Logger.Error("Exiting due to insufficient disk space.")
+            self.HashManager.SaveHashes(self.NewHashes)
+            return False
         except Exception as Error:
             Logger.Error(f"Download manager error: {str(Error)}")
+            self.HashManager.SaveHashes(self.NewHashes)
             return False
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
     async def DownloadFile(self, Item: DownloadItem, progress, TaskId) -> bool:
         try:
             async with self.Semaphore:
-                if not await CheckDiskSpace():
-                    sys.exit(0)
+                await CheckDiskSpace()  # This may raise InsufficientDiskSpaceError
 
                 try:
                     # Get file size first
@@ -534,6 +542,8 @@ class AsyncDownloadManager:
                     #Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
                     return False
 
+        except InsufficientDiskSpaceError:
+            raise  # Propagate the exception to be handled in Start()
         except Exception as Error:
             self.FailedFiles += 1
             if os.path.exists(f"{Item.SavePath}.downloading"):
@@ -990,12 +1000,19 @@ def Main():
             if AllFiles:
                 # Use asyncio.run to start the async download manager
                 Downloader = AsyncDownloadManager(AllFiles)
-                asyncio.run(Downloader.Start())
+                result = asyncio.run(Downloader.Start())
+                if not result:
+                    Logger.Critical("Download process terminated due to errors.")
+                    sys.exit(1)  # Use a non-zero exit code for errors
 
     except KeyboardInterrupt:
         Logger.Warning("Interrupted by user")
+    except InsufficientDiskSpaceError:
+        Logger.Critical("Program terminated due to insufficient disk space.")
+        sys.exit(1)
     except Exception as e:
         Logger.Error(f"Error: {e}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     Main()
