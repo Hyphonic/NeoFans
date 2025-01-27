@@ -81,7 +81,7 @@ class RichLogger:
 Logger = RichLogger(__name__)
 
 async def ReadConfig():
-    async with aiofiles.open('config.json', 'r') as f:
+    async with aiofiles.open('config.json', 'r', encoding='utf-8') as f:
         return json.loads(await f.read())
 
 Config = asyncio.run(ReadConfig())
@@ -645,140 +645,75 @@ Screen = rf'''
 
 '''
 
+############################################################
+#                                                          #
+#                           Main                           #
+#                                                          #
+############################################################
+
+# Fix FavoriteFetcher usage
 async def Main():
     Console(force_terminal=True).print(Screen)
     try:
         InitialGlobalLimit = Config['global_limit']
-
         CheckForDuplicateIds()
 
-        # Set creator_limit to 0 if platform not in enabled_platforms
-        for Platform in Config['directory_names'].keys():
-            if not Config['enabled_platforms'][Platform]:
-                Config[Platform]['creator_limit'] = 0
+        # Initialize favorites properly
+        await FavoriteFetcher.Create('coomer')
+        await FavoriteFetcher.Create('kemono')
 
-        await FavoriteFetcher.Create('coomer')  # Fetch favorites from Coomer
-        await FavoriteFetcher.Create('kemono')  # Fetch favorites from Kemono
-
-        for Platform in Config['directory_names'].keys():
-            if Platform in ['rule34', 'e621']:
-                for Creator in Config[Platform]['ids']:
-                    Config[Platform]['directory_names'].append(f'{Config["directory_names"][Platform]}/{Creator.capitalize()}')
-                    Config[Platform]['names'].append(Creator.capitalize())
-            else:
-                for Creator in Config[Platform]['names']:
-                    Config[Platform]['directory_names'].append(f'{Config["directory_names"][Platform]}/{Creator.capitalize()}')
-
-        for Platform in Config['directory_names'].keys():
-            Logger.Debug(f'∙ Loaded {len(Config[Platform]["ids"])} {Config["platform_names"][Platform]} creators')
-        Logger.Info(f'Loaded {sum([len(Config[Platform]["ids"]) for Platform in Config["directory_names"].keys() if Config[Platform]["creator_limit"] > 0])} creators')
-
-        Logger.Debug('∙ Starting in dry-run mode') if Config.get('dry_run', False) else None
-
-        # Create progress for each enabled platform
-        ProgressColumns = [
-            TextColumn("[cyan]{task.fields[platform]}"),
-            BarColumn(bar_width=None),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("•"),
-            TextColumn("[blue]{task.fields[creator]}"),
-            TextColumn("•"),
-            MofNCompleteColumn(),
-            TextColumn("•"),
-            TextColumn("[yellow]{task.fields[global_progress]}/{task.fields[global_limit]}"),
-            TimeRemainingColumn(),
-        ]
-
-        Collection = []
-
+        # Fix Fetcher usage
+        Tasks = []
         for Platform in Config['directory_names'].keys():
             if Config[Platform]['creator_limit'] > 0:
-                if Config['platform_limit_debug'] > 0:
-                    Config[Platform]['ids'] = Config[Platform]['ids'][:Config['platform_limit_debug']]
-                    Config[Platform]['names'] = Config[Platform]['names'][:Config['platform_limit_debug']]
-                    Config[Platform]['directory_names'] = Config[Platform]['directory_names'][:Config['platform_limit_debug']]
-            
-            Config[Platform]['names'] = [Name.capitalize() for Name in Config[Platform]['names']]
+                Tuple = list(zip(
+                    Config[Platform]['ids'],
+                    Config[Platform]['names'],
+                    Config[Platform]['directory_names']
+                ))
 
-        with Progress(*ProgressColumns, console=Console(force_terminal=True), auto_refresh=False, expand=True) as ProgressBar:
-            TotalCreators = sum([
-                len(Config[Platform]['ids']) 
-                for Platform in Config['directory_names'].keys() 
-                if Config[Platform]['creator_limit'] > 0
-            ])
-            
-            # Single task that we'll update with current platform/creator
-            Task = ProgressBar.add_task(
-                "Downloading",
-                total=TotalCreators,
-                platform="Starting...",
-                creator="Initializing...",
-                global_progress=0,
-                global_limit=Config['global_limit']
-            )
+                for Data in Tuple:
+                    Id, Name, DirectoryName = Data
+                    FetcherInstance = Fetcher(
+                        Platform=Platform,
+                        Id=Id, 
+                        Name=Name,
+                        DirectoryName=DirectoryName,
+                        CachedHashes=Config['cached_hashes'],
+                        CreatorLimit=Config[Platform]['creator_limit'],
+                        GlobalLimit=Config['global_limit']
+                    )
+                    Tasks.append(FetcherInstance.Scrape())
 
-            Tasks = []
-            for Platform in Config['directory_names'].keys():
-                if Config[Platform]['creator_limit'] > 0:
-                    Tuple = list(zip(
-                        Config[Platform]['ids'],
-                        Config[Platform]['names'],
-                        Config[Platform]['directory_names']
-                    ))
-
-                    for Data in Tuple:
-                        Id, Name, DirectoryName = Data
-                        # Update task fields instead of logging
-                        ProgressBar.update(
-                            Task,
-                            advance=1,
-                            platform=Config['platform_names'][Platform],
-                            creator=Name.capitalize(),
-                            global_progress=InitialGlobalLimit - Config['global_limit']  # Calculate remaining from current global limit
-                        )
-                        
-                        FetcherInstance = Fetcher(
-                            Platform=Platform,
-                            Id=Id,
-                            Name=Name,
-                            DirectoryName=DirectoryName,
-                            CachedHashes=Config['cached_hashes'],
-                            CreatorLimit=Config[Platform]['creator_limit'],
-                            GlobalLimit=Config['global_limit']
-                        )
-                        Tasks.append(FetcherInstance.Scrape())
-                        ProgressBar.refresh()
+        # Single gather for all tasks
+        Results = await asyncio.gather(*Tasks)
         
-        Results = await asyncio.gather(*Tasks)
-        Collection.extend(Results)
+        # Process results
+        AllFiles = []
+        for GlobalLimit, Result in Results:
+            if Result:
+                for Platform in Result:
+                    for Creator in Result[Platform]:
+                        AllFiles.extend([(FileData, Platform, Creator) 
+                                       for FileData in Result[Platform][Creator]])
 
-        Results = await asyncio.gather(*Tasks)
-        Collection = Results  # Direct assignment instead of extend
-
-        if Collection:  # Process results
-            AllFiles = []
-            for Result in Collection:
-                if Result and isinstance(Result, tuple) and len(Result) == 2:
-                    GlobalLimit, ResultData = Result
-                    for Platform in ResultData:
-                        for Creator in ResultData[Platform]:
-                            Files = ResultData[Platform][Creator]
-                            for FileData in Files:
-                                if isinstance(FileData, list) and len(FileData) == 3:
-                                    AllFiles.append((FileData, Platform, Creator))
-            
-            if AllFiles:
-                Downloader = AsyncDownloadManager(AllFiles)
-                Result = await Downloader.Start()
-                if not Result:
-                    Logger.Debug("∙ Hashes have been saved before exiting.")
-                    return
+        if AllFiles:
+            Downloader = AsyncDownloadManager(AllFiles)
+            Success = await Downloader.Start()
+            if not Success:
+                Logger.Debug("∙ Hashes have been saved before exiting.")
+                return
 
     except KeyboardInterrupt:
         Logger.Warning("Interrupted by user")
-    except Exception as e:
-        Logger.Error(f"Error: {e}")
+    except Exception as Error:
+        Logger.Error(f"Error: {str(Error)}")
         Logger.Debug("∙ Hashes have been saved before exiting.")
 
 if __name__ == '__main__':
-    asyncio.run(Main())
+    try:
+        asyncio.run(Main())
+    except KeyboardInterrupt:
+        Logger.Warning("Program interrupted by user")
+    except Exception as Error:
+        Logger.Critical(f"Fatal error: {str(Error)}")
