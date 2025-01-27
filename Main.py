@@ -461,15 +461,20 @@ class AsyncDownloadManager:
                         await asyncio.gather(*tasks)
 
             self.HashManager.SaveHashes(self.NewHashes)
+            Logger.Debug(f"∙ Saved {sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())} new hashes to cache")
             return True
             
         except InsufficientDiskSpaceError:
-            Logger.Error("Exiting due to insufficient disk space.")
+            Logger.Error("Insufficient disk space encountered.")
             self.HashManager.SaveHashes(self.NewHashes)
+            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
+            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
             return False
         except Exception as Error:
-            Logger.Error(f"Download manager error: {str(Error)}")
+            Logger.Error(f"Download manager encountered an error: {str(Error)}")
             self.HashManager.SaveHashes(self.NewHashes)
+            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
+            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
             return False
 
     @backoff.on_exception(backoff.expo, Exception, max_tries=3)
@@ -1002,17 +1007,16 @@ def Main():
                 Downloader = AsyncDownloadManager(AllFiles)
                 result = asyncio.run(Downloader.Start())
                 if not result:
-                    Logger.Critical("Download process terminated due to errors.")
-                    sys.exit(1)  # Use a non-zero exit code for errors
+                    Logger.Debug("∙ Hashes have been saved before exiting.")
+                    return  # Exit gracefully without an error code
 
     except KeyboardInterrupt:
         Logger.Warning("Interrupted by user")
     except InsufficientDiskSpaceError:
         Logger.Critical("Program terminated due to insufficient disk space.")
-        sys.exit(1)
     except Exception as e:
         Logger.Error(f"Error: {e}")
-        sys.exit(1)
+        Logger.Debug("∙ Hashes have been saved before exiting.")
 
 if __name__ == '__main__':
     Main()
