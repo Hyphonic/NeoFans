@@ -648,51 +648,48 @@ async def Main():
         "{task.fields[size]}",
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
-        auto_refresh=False
     ) as ProgressBar:
         MainTask = ProgressBar.add_task(
             "",
             total=len(AllFiles),
             creator="",
             progress="0/0",
-            size="0B/0B"
+            size="0B"
         )
 
         CompletedFiles = 0
-        TotalBytes = 0
-        DownloadedBytes = 0
 
-        # First pass - get total size
         for File in AllFiles:
             FileData, Platform, Creator = File
             Downloader = AsyncDownloader(FileData, Platform, Creator)
             FileSize = await Downloader.Size()
-            TotalBytes += FileSize
-            # Add a small delay to allow progress updates
-            await asyncio.sleep(0)
-
-        # Second pass - download files
-        for File in AllFiles:
-            FileData, Platform, Creator = File
-            Downloader = AsyncDownloader(FileData, Platform, Creator)
-            FileSize = await Downloader.Size()
-            Success = await Downloader.Download()
+            await Downloader.Download()
             
             CompletedFiles += 1
-            if Success:
-                DownloadedBytes += FileSize
+            Semaphore = asyncio.Semaphore(10)
 
-            ProgressBar.update(
-                MainTask,
-                description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
-                advance=1,
-                creator=f"{Creator}",
-                progress=f"{CompletedFiles}/{len(AllFiles)}",
-                size=f"{HumanizeBytes(DownloadedBytes)}/{HumanizeBytes(TotalBytes)}"
-            )
-            ProgressBar.refresh()
-            # Add a small delay to allow progress updates
-            await asyncio.sleep(0)
+            async def Worker():
+                nonlocal CompletedFiles
+                async with Semaphore:
+                    FileData, Platform, Creator = File
+                    Downloader = AsyncDownloader(FileData, Platform, Creator)
+                    FileSize = await Downloader.Size()
+                    await Downloader.Download()
+                    
+                    CompletedFiles += 1
+                    ProgressBar.update(
+                        MainTask,
+                        description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                        advance=1,
+                        creator=f"{Creator}",
+                        progress=f"{CompletedFiles}/{len(AllFiles)}",
+                        size=f"{HumanizeBytes(FileSize)}"
+                    )
+                    ProgressBar.refresh()
+                
+            
+            Tasks = [Worker(File) for File in AllFiles]
+            await asyncio.gather(*Tasks)
 
 if __name__ == '__main__':
     try:
