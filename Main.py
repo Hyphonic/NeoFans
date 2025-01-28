@@ -129,9 +129,11 @@ class AsyncDownloader:
                 pass
                 return False
                 #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform} ({Response.status_code})')
+        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+            return False
         except Exception as e:
-            #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}: {e}')
-            Console(force_terminal=True).print_exception()
+            if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
+                Console(force_terminal=True).print_exception()
             return False
         finally:
             await self.Client.aclose()
@@ -143,7 +145,11 @@ class AsyncDownloader:
                 return int(Response.headers['content-length'])
             else:
                 return 0
+        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+            return 0
         except Exception:
+            if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
+                Console(force_terminal=True).print_exception()
             return 0
 
 class HashManager:
@@ -669,7 +675,7 @@ async def Main():
             async with Semaphore:
                 FileData, Platform, Creator = File
                 Downloader = AsyncDownloader(FileData, Platform, Creator)
-                FileSize = await Downloader.Size()
+                FileSize = await Downloader.Size(FileData[1])
                 Success = await Downloader.Download()
 
                 if Success:
