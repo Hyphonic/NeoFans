@@ -243,11 +243,13 @@ class Fetcher:
 
     async def FetchUrl(self, Url: str, Params: Dict = None) -> Dict:
         try:
-            Response = await self.Client.get(Url, params=Params)
+            Response = await self.Client.get(Url, params=Params, timeout=30.0)
             if Response.status_code == 200:
                 return Response.json(), Response.status_code
             return None, Response.status_code
         except Exception:
+            return None, None
+        except httpx.TimeoutException:
             return None, None
 
     async def Scrape(self):
