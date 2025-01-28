@@ -426,12 +426,12 @@ class Fetcher:
                         #Logger.Info(f'Found {_} files')
 
                     else:
-                        Logger.Error(f'No response or bad status ({StatusCode})')
-                        pass
+                        #Logger.Error(f'No response or bad status ({StatusCode})')
+                        break
                         
                 except Exception:
                     #Logger.Error(f'Error processing page: {e}')
-                    pass
+                    break
 
                 self.Page += 50
 
