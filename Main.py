@@ -133,7 +133,7 @@ class AsyncDownloader:
             return False
         except Exception as e:
             if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
-                Console(force_terminal=True).print_exception()
+                Console(force_terminal=True).print_exception(max_frames=1)
             return False
         finally:
             await self.Client.aclose()
@@ -147,9 +147,9 @@ class AsyncDownloader:
                 return 0
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
             return 0
-        except Exception:
+        except Exception as e:
             if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
-                Console(force_terminal=True).print_exception()
+                Console(force_terminal=True).print_exception(max_frames=1)
             return 0
 
 class HashManager:
@@ -675,7 +675,7 @@ async def Main():
             async with Semaphore:
                 FileData, Platform, Creator = File
                 Downloader = AsyncDownloader(FileData, Platform, Creator)
-                FileSize = await Downloader.Size(FileData[1])
+                FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
                 if Success:
@@ -704,6 +704,6 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         Logger.Warning('Program interrupted by user')
     except Exception:
-        Console(force_terminal=True).print_exception()
+        Console(force_terminal=True).print_exception(max_frames=1)
     finally:
         Logger.Info('Exiting program')
