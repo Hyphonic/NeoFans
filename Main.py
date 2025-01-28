@@ -296,7 +296,7 @@ class Fetcher:
                                 FileUrl = Post.get('file_url')
                                 FileHash = self.ExtractHash(FileUrl)
 
-                                if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
                                     #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
@@ -356,7 +356,7 @@ class Fetcher:
                                     continue
                                     
                                 FileHash = self.ExtractHash(FileUrl)
-                                if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
                                     #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
@@ -410,7 +410,7 @@ class Fetcher:
                                     FileUrl = f'https://{Hoster}.su{Attachment.get('path')}'
                                     FileHash = self.ExtractHash(FileUrl)
                                     
-                                    if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
                                         #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                         continue
 
@@ -429,7 +429,7 @@ class Fetcher:
                                     FileUrl = f'https://{Hoster}.su{File.get('path')}'
                                     FileHash = self.ExtractHash(FileUrl)
                                     
-                                    if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
                                         #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                         continue
 
