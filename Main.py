@@ -682,8 +682,8 @@ async def Main():
                 ProgressBar.refresh()
                 
             
-            Tasks = [Worker(File) for File in AllFiles]
-            await asyncio.gather(*Tasks)
+        Tasks = [Worker(File) for File in AllFiles]
+        await asyncio.gather(*Tasks)
 
 if __name__ == '__main__':
     try:
