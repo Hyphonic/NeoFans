@@ -133,15 +133,6 @@ class AsyncDownloader:
             #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}: {e}')
             Console(force_terminal=True).print_exception()
             return False
-        except httpx.TimeoutException:
-            #Logger.Error(f'Timeout downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
-            return False
-        except httpx.HTTPStatusError:
-            #Logger.Error(f'HTTP error downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
-            return False
-        except httpx.Timeout:
-            #Logger.Error(f'Timeout downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
-            return False
         finally:
             await self.Client.aclose()
     
@@ -178,16 +169,16 @@ class HashManager:
         '''Save new hashes to the cache file while preserving existing ones.'''
         try:
             for platform, creators in new_hashes.items():
-                if platform not in self.cached_hashes:
-                    self.cached_hashes[platform] = {}
                 for creator, hashes in creators.items():
+                    if platform not in self.cached_hashes:
+                        self.cached_hashes[platform] = {}
                     if creator not in self.cached_hashes[platform]:
                         self.cached_hashes[platform][creator] = []
-                    # Only append new unique hashes
+                    # Only add unique hashes
                     self.cached_hashes[platform][creator].extend(
-                        [h for h in hashes if h not in self.cached_hashes[platform][creator]]
+                        hash for hash in hashes 
+                        if hash not in self.cached_hashes[platform][creator]
                     )
-            
             async with aiofiles.open(self.cache_file, 'w') as f:
                 await f.write(json.dumps(self.cached_hashes, indent=4))
         except Exception as e:
@@ -195,11 +186,9 @@ class HashManager:
 
     async def HasHash(self, platform: str, creator: str, file_hash: str) -> bool:
         '''Check if a hash exists in the cache.'''
-        return (
-            platform in self.cached_hashes and
-            creator in self.cached_hashes[platform] and
-            file_hash in self.cached_hashes[platform][creator]
-        )
+        if file_hash in self.cached_hashes.get(platform, {}).get(creator, []):
+            return True
+        return False
 
 class Fetcher:
     def __init__(self, Platform, Id, Name, DirectoryName, CachedHashes, CreatorLimit, GlobalLimit):
@@ -520,6 +509,8 @@ Screen = rf'''
 ############################################################
 
 # Fix FavoriteFetcher usage
+Manager = HashManager()  # Single instance to be reused
+
 async def Main():
     Console(force_terminal=True).print(Screen)
     CheckForDuplicateIds()
@@ -538,7 +529,8 @@ async def Main():
 
     Logger.Debug('Loading Cached Hashes:')
 
-    await HashManager().LoadCache()
+    # Initialize hash manager once
+    await Manager.LoadCache()
 
     # Set directory names
 
@@ -681,7 +673,8 @@ async def Main():
                 Success = await Downloader.Download()
 
                 if Success:
-                    HashManager().SaveHashes({Platform: {Creator: [FileData[0]]}})
+                    # Use the global Manager instance
+                    await Manager.SaveHashes({Platform: {Creator: [FileData[0]]}})
                 
                 CompletedFiles += 1
                 Name = Config[Platform]['names'][Config[Platform]['ids'].index(Creator)]
