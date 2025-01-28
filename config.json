@@ -2277,7 +2277,6 @@
         "gumroad": true
     },
     "global_limit": 5000,
-    "dry_run": true,
     "platform_limit_debug": 1,
     "cached_hashes": {},
     "version": "3.0.2",

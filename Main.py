@@ -1,42 +1,17 @@
-from dataclasses import dataclass
-from typing import Dict, Optional
+import aiofiles.os
 from rich.console import Console
 from dotenv import load_dotenv
+from typing import Dict
 import urllib.parse
 import aiofiles
-import argparse
 import asyncio
-import aiohttp
-import backoff
-import shutil
 import httpx
 import json
 import os
-import re
 
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TextColumn,
-    TimeRemainingColumn,
-)
+from rich.progress import Progress, BarColumn, TimeElapsedColumn
 
 load_dotenv()
-
-Parser = argparse.ArgumentParser(
-    description="Fetch and download content from various platforms",
-    prog="NeoFetch",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter
-)
-
-Parser.add_argument(
-    "--dry-run",
-    help="Run without downloading any files",
-    default=False,
-    type=bool,
-    nargs='?',
-)
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -60,23 +35,23 @@ class RichLogger:
 
     def Debug(self, Message):
         if LOG_LEVEL <= self.LogLevels['DEBUG']:
-            self.Console.log(f"[bold blue]DEBUG:   [/bold blue] {Message}")
+            self.Console.log(f'[bold blue]DEBUG:   [/bold blue] {Message}')
 
     def Info(self, Message):
         if LOG_LEVEL <= self.LogLevels['INFO']:
-            self.Console.log(f"[bold green]INFO:    [/bold green] {Message}")
+            self.Console.log(f'[bold green]INFO:    [/bold green] {Message}')
 
     def Warning(self, Message):
         if LOG_LEVEL <= self.LogLevels['WARNING']:
-            self.Console.log(f"[bold yellow]WARNING: [/bold yellow] {Message}")
+            self.Console.log(f'[bold yellow]WARNING: [/bold yellow] {Message}')
 
     def Error(self, Message):
         if LOG_LEVEL <= self.LogLevels['ERROR']:
-            self.Console.log(f"[bold red]ERROR:   [/bold red] {Message}")
+            self.Console.log(f'[bold red]ERROR:   [/bold red] {Message}')
 
     def Critical(self, Message):
         if LOG_LEVEL <= self.LogLevels['CRITICAL']:
-            self.Console.log(f"[bold magenta]CRITICAL:[/bold magenta] {Message}")
+            self.Console.log(f'[bold magenta]CRITICAL:[/bold magenta] {Message}')
 
 Logger = RichLogger(__name__)
 
@@ -131,49 +106,53 @@ class FavoriteFetcher:
                     Config[Service]['ids'].append(CreatorId)
                     Config[Service]['names'].append(CreatorName)
 
-class InsufficientDiskSpaceError(Exception):
-    """Exception raised when there is not enough disk space."""
-    pass
+class AsyncDownloader:
+    def __init__(self, FileData: tuple, Platform: str, Creator: str):
+        self.Hash = FileData[0]
+        self.Url = FileData[1]
+        self.Path = FileData[2]
+        self.Platform = Platform
+        self.Creator = Creator
+        self.Client = httpx.AsyncClient()
 
-async def CheckDiskSpace(RequiredBytes: int = 5e+9) -> bool:
-    """Check if sufficient disk space is available"""
-    if shutil.disk_usage('/').free < RequiredBytes:
-        Logger.Critical(f"Insufficient disk space! Only {AsyncDownloadManager.HumanizeBytes(shutil.disk_usage('/').free)} remaining")
-        raise InsufficientDiskSpaceError("Not enough disk space to continue.")
-    return True
+        self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
 
-@dataclass
-class DownloadItem:
-    """Represents a single file to be downloaded"""
-    FileHash: str
-    FileUrl: str 
-    SavePath: str
-    Platform: str
-    Creator: str
-    FileSize: Optional[int] = None
-    RetryCount: int = 0
+    async def Download(self):
+        try:
+            Response = await self.Client.get(self.Url)
+            if Response.status_code == 200:
+                async with aiofiles.open(self.Path, 'wb') as f:
+                    await f.write(Response.content)
+                #Logger.Debug(f'∙ Downloaded {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
+            else:
+                pass
+                #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform} ({Response.status_code})')
+        except Exception as e:
+            #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}: {e}')
+            Console(force_terminal=True).print_exception()
+        finally:
+            await self.Client.aclose()
 
 class HashManager:
-    """Handles loading and saving cached hashes."""
+    '''Handles loading and saving cached hashes.'''
     def __init__(self, cache_file: str = 'cached_hashes.json'):
         self.cache_file = cache_file
         self.cached_hashes = {}
-        self.LoadCache()
 
     def LoadCache(self):
-        """Load cached hashes from the cache file."""
+        '''Load cached hashes from the cache file.'''
         try:
             with open(self.cache_file, 'r') as f:
                 self.cached_hashes = json.load(f)
                 TotalHashes = sum(len(hashes) for platform in self.cached_hashes.values() 
                                   for hashes in platform.values())
-                Logger.Debug(f"∙ Loaded {TotalHashes} cached hashes")
+                Logger.Debug(f'∙ Loaded {TotalHashes} cached hashes')
         except (FileNotFoundError, json.JSONDecodeError):
             self.cached_hashes = {}
-            Logger.Debug("∙ No existing cache found, starting fresh")
+            Logger.Debug('∙ No existing cache found, starting fresh')
 
     def SaveHashes(self, new_hashes: Dict[str, Dict[str, list[str]]]):
-        """Save new hashes to the cache file."""
+        '''Save new hashes to the cache file.'''
         try:
             for platform, creators in new_hashes.items():
                 if platform not in self.cached_hashes:
@@ -186,184 +165,17 @@ class HashManager:
                     )
             with open(self.cache_file, 'w') as f:
                 json.dump(self.cached_hashes, f, indent=4)
-            Logger.Debug("∙ Saved new hashes to cache")
+            Logger.Debug('∙ Saved new hashes to cache')
         except Exception as e:
-            Logger.Error(f"Failed to save cache: {e}")
+            Logger.Error(f'Failed to save cache: {e}')
 
     def HasHash(self, platform: str, creator: str, file_hash: str) -> bool:
-        """Check if a hash exists in the cache."""
+        '''Check if a hash exists in the cache.'''
         return (
             platform in self.cached_hashes and
             creator in self.cached_hashes[platform] and
             file_hash in self.cached_hashes[platform][creator]
         )
-
-class AsyncDownloadManager:
-    """Handles async downloads with retry logic and progress tracking"""
-    def __init__(self, FileList: list, MaxConcurrent: int = 32):
-        self.Items = [DownloadItem(FileHash=f[0][0], FileUrl=f[0][1], SavePath=f[0][2], 
-                                 Platform=f[1], Creator=f[2]) for f in FileList]
-        self.MaxConcurrent = MaxConcurrent
-        self.ProcessedHashes = set()
-        self.DryRun = Config.get('dry_run', False)
-        self.TotalFiles = len(FileList)
-        self.CompletedFiles = 0
-        self.FailedFiles = 0
-        self.TotalBytes = 0
-        self.NewHashes = {}
-        self.Lock = asyncio.Lock()
-        self.HashManager = HashManager()  # Initialize HashManager
-
-    async def Start(self) -> bool:
-        try:
-            self.Semaphore = asyncio.Semaphore(self.MaxConcurrent)
-            async with aiohttp.ClientSession() as Session:
-                self.Session = Session
-                
-                Logger.Info(f"∙ Downloading {self.TotalFiles} files...")
-
-                def GetPlatformColor(Platform):
-                    PlatformText = Config['platform_names'].get(Platform, '')
-                    ColorMatch = re.search(r'\[([a-z0-9_]+)\]', PlatformText.lower())
-                    return ColorMatch.group(1) if ColorMatch else 'white'
-
-                ProgressColumns = [
-                    TextColumn("{task.fields[creator]}", style=f"bold {GetPlatformColor(self.Items[0].Platform)}"),
-                    BarColumn(bar_width=None),
-                    TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                    TextColumn("•"),
-                    TextColumn("[blue]{task.fields[file]}"),
-                    TextColumn("•"), 
-                    TextColumn("{task.fields[size]}"),
-                    TextColumn("•"),
-                    MofNCompleteColumn(),
-                    TimeRemainingColumn(),
-                ]
-
-                Progress_Bar = Progress(*ProgressColumns, auto_refresh=False, console=RichLogger().Console, expand=True)
-                
-                with Progress_Bar as progress:
-                    task_id = progress.add_task(
-                        "",
-                        total=self.TotalFiles,
-                        file="Starting...",
-                        size="0 B",
-                        platform=self.Items[0].Platform if self.Items else "",
-                        creator=self.Items[0].Creator if self.Items else ""
-                    )
-
-                    # Create download tasks for all files
-                    tasks = []
-                    for item in self.Items:
-                        if not self.HashManager.HasHash(item.Platform, item.Creator, item.FileHash):
-                            tasks.append(self.DownloadFile(item, progress, task_id))
-                        else:
-                            Logger.Debug(f"∙ Skipping {item.FileHash} as it is already cached")
-                    
-                    if tasks:
-                        await asyncio.gather(*tasks)
-
-            self.HashManager.SaveHashes(self.NewHashes)
-            Logger.Debug(f"∙ Saved {sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())} new hashes to cache")
-            return True
-            
-        except InsufficientDiskSpaceError:
-            Logger.Error("Insufficient disk space encountered.")
-            self.HashManager.SaveHashes(self.NewHashes)
-            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
-            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
-            return False
-        except Exception as Error:
-            Logger.Error(f"Download manager encountered an error: {str(Error)}")
-            self.HashManager.SaveHashes(self.NewHashes)
-            total_saved = sum(len(hashes) for platform in self.NewHashes.values() for hashes in platform.values())
-            Logger.Debug(f"∙ Saved {total_saved} hashes before exiting.")
-            return False
-
-    @backoff.on_exception(backoff.expo, Exception, max_tries=3)
-    async def DownloadFile(self, Item: DownloadItem, progress, TaskId) -> bool:
-        try:
-            async with self.Semaphore:
-                await CheckDiskSpace()  # This may raise InsufficientDiskSpaceError
-
-                try:
-                    # Get file size first
-                    async with self.Session.head(Item.FileUrl, allow_redirects=True) as Response:
-                        if Response.status != 200:
-                            #Logger.Warning(f"Failed to get size for {Item.FileHash}: {Response.status}")
-                            return False
-                        FileSize = int(Response.headers.get('content-length', 0))
-                        Item.FileSize = FileSize
-
-                    if self.DryRun:
-                        await asyncio.sleep(0.1)
-                        async with self.Lock:
-                            self.CompletedFiles += 1
-                            self.ProcessedHashes.add(Item.FileHash)
-                            progress.update(TaskId, completed=self.CompletedFiles, 
-                                            file=f"{Item.FileHash[:20]}...", 
-                                            size=self.HumanizeBytes(FileSize))
-                            progress.refresh()  # Add refresh here for dry run
-                        return True
-
-                    # Real download
-                    TempPath = f"{Item.SavePath}.downloading"
-                    async with self.Session.get(Item.FileUrl) as Response:
-                        if Response.status == 200:
-                            os.makedirs(os.path.dirname(Item.SavePath), exist_ok=True)
-                            
-                            async with aiofiles.open(TempPath, 'wb') as f:
-                                Downloaded = 0
-                                async for Chunk in Response.content.iter_chunked(1024*1024):
-                                    if Chunk:
-                                        await f.write(Chunk)
-                                        Downloaded += len(Chunk)
-                                        async with self.Lock:
-                                            progress.update(TaskId, 
-                                                            file=f"{Item.FileHash[:20]}...",
-                                                            size=self.HumanizeBytes(Downloaded))
-                                progress.refresh()  # Add refresh here for chunk updates
-
-                            # Rename from .downloading to final name
-                            os.rename(TempPath, Item.SavePath)
-                            
-                            # Track hash for caching
-                            async with self.Lock:
-                                if Item.Platform not in self.NewHashes:
-                                    self.NewHashes[Item.Platform] = {}
-                                if Item.Creator not in self.NewHashes[Item.Platform]:
-                                    self.NewHashes[Item.Platform][Item.Creator] = []
-                                self.NewHashes[Item.Platform][Item.Creator].append(Item.FileHash)
-                                
-                                self.CompletedFiles += 1
-                                self.ProcessedHashes.add(Item.FileHash)
-                                self.TotalBytes += Downloaded
-                                progress.update(TaskId, completed=self.CompletedFiles)
-
-                            return True
-
-                    return False
-
-                except SystemExit as Error:
-                    raise Error  # Re-raise disk space error
-                except Exception: # as Error:
-                    #Logger.Warning(f"Download failed for {Item.FileHash}: {str(Error)}")
-                    return False
-
-        except InsufficientDiskSpaceError:
-            raise  # Propagate the exception to be handled in Start()
-        except Exception as Error:
-            self.FailedFiles += 1
-            if os.path.exists(f"{Item.SavePath}.downloading"):
-                os.remove(f"{Item.SavePath}.downloading")
-            raise Error
-
-    @staticmethod
-    def HumanizeBytes(Bytes: int) -> str:
-        for Unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if Bytes < 1024:
-                return f"{Bytes:.2f} {Unit}"
-            Bytes /= 1024
 
 class Fetcher:
     def __init__(self, Platform, Id, Name, DirectoryName, CachedHashes, CreatorLimit, GlobalLimit):
@@ -382,8 +194,6 @@ class Fetcher:
         self.FilesDownloaded = 0
 
         self.CachedHashes = CachedHashes
-
-        #self.FetcherInstance = FavoriteFetcher('coomer')  # Use shared instance for hash checking
 
         self.Params = None
 
@@ -408,8 +218,6 @@ class Fetcher:
 
         self.ParamsLimit = self.Params['limit'] if self.Params else 0
         self.Params = urllib.parse.urlencode(self.Params, safe='+') if self.Platform in ['rule34', 'e621'] else self.Params  # Avoid '+' encoding in params
-        self.DryRun = Config.get('dry_run', False)
-        self.CacheManager = HashManager()  # Initialize HashManager
 
     def ExtractHash(self, Url):  # Extract hash from URL / <hash> .png
         if not Url:
@@ -431,8 +239,8 @@ class Fetcher:
         if self.Platform == 'rule34':
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
-                BaseParams["pid"] = self.Page
-                ReEncodedParams = urllib.parse.urlencode(BaseParams, safe="+")
+                BaseParams['pid'] = self.Page
+                ReEncodedParams = urllib.parse.urlencode(BaseParams, safe='+')
                 Response, StatusCode = await self.FetchUrl('https://api.rule34.xxx/index.php', ReEncodedParams)
                 
                 try:
@@ -447,8 +255,8 @@ class Fetcher:
                                 FileUrl = Post.get('file_url')
                                 FileHash = self.ExtractHash(FileUrl)
 
-                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                if FileHash and HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
@@ -473,7 +281,7 @@ class Fetcher:
                         else:
                             #Logger.Error(f'No data at page {self.Page+1}')
                             break
-                except Exception:
+                except Exception as e:
                     #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
@@ -488,9 +296,9 @@ class Fetcher:
         elif self.Platform == 'e621':
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
-                BaseParams["page"] = self.Page + 1
-                ReEncodedParams = urllib.parse.urlencode(BaseParams, safe="+")
-                Response, StatusCode = await self.FetchUrl("https://e621.net/posts.json", ReEncodedParams)
+                BaseParams['page'] = self.Page + 1
+                ReEncodedParams = urllib.parse.urlencode(BaseParams, safe='+')
+                Response, StatusCode = await self.FetchUrl('https://e621.net/posts.json', ReEncodedParams)
                 
                 try:
                     if Response and 'posts' in Response:
@@ -506,8 +314,8 @@ class Fetcher:
                                     continue
                                     
                                 FileHash = self.ExtractHash(FileUrl)
-                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                if FileHash and HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
@@ -528,7 +336,7 @@ class Fetcher:
                         #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
                         break
                         
-                except Exception:
+                except Exception as e:
                     #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
@@ -555,11 +363,11 @@ class Fetcher:
                                 if self.GlobalLimit <= 0 or self.CreatorLimit <= 0:
                                     break
                                     
-                                FileUrl = f'https://{Hoster}.su{Attachment.get("path")}'
+                                FileUrl = f'https://{Hoster}.su{Attachment.get('path')}'
                                 FileHash = self.ExtractHash(FileUrl)
                                 
-                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                if FileHash and HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
@@ -574,11 +382,11 @@ class Fetcher:
                             # Handle main file
                             File = Post.get('file', {})
                             if File:
-                                FileUrl = f'https://{Hoster}.su{File.get("path")}'
+                                FileUrl = f'https://{Hoster}.su{File.get('path')}'
                                 FileHash = self.ExtractHash(FileUrl)
                                 
-                                if FileHash and self.CacheManager.HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f"∙ Skipping {FileHash} as it is already cached")
+                                if FileHash and HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
@@ -596,7 +404,7 @@ class Fetcher:
                     #Logger.Error(f'No response or bad status ({StatusCode})')
                     pass
                     
-            except Exception:
+            except Exception as e:
                 #Logger.Error(f'Error processing page: {e}')
                 pass
 
@@ -609,10 +417,37 @@ class Fetcher:
 
         await self.Client.aclose()
         return self.GlobalLimit, self.Result
+
+async def CreateDirectories(Directories):
+    with Progress(
+        '[progress.description]{task.description}',
+        BarColumn(bar_width=None),
+        '[progress.percentage]{task.percentage:>3.0f}%',
+        '•',
+        '{task.fields[creator]}',
+        console=Console(force_terminal=True),
+        auto_refresh=False
+    ) as ProgressBar:
+        MainTask = ProgressBar.add_task(
+            '',
+            total=len(Directories),
+            creator=''
+        )
+
+        for Directory in Directories:
+            try:
+                os.makedirs(Directory, exist_ok=True)
+                ProgressBar.update(
+                    MainTask,
+                    description='[blue]Creating Directories[/blue]',
+                    advance=1,
+                    creator=Directory,
+                )
+                ProgressBar.refresh()
+            except Exception as e:
+                Logger.Error(f'Failed to create directory {Directory}: {e}')
     
 def CheckForDuplicateIds():
-    Logger.Info("Checking For Duplicate IDs...")
-    
     def FindDuplicates(Items):
         Seen = {}
         Duplicates = []
@@ -627,19 +462,19 @@ def CheckForDuplicateIds():
     for Platform in Config['directory_names'].keys():
         Duplicates = FindDuplicates(Config[Platform]['ids'])
         if Duplicates:
-            Logger.Warning(f"[{Config['platform_names'][Platform]}] Found {len(Duplicates)} duplicate IDs:")
+            Logger.Warning(f'[{Config['platform_names'][Platform]}] Found {len(Duplicates)} duplicate IDs:')
             for Duplicate in Duplicates:
-                Logger.Warning(f"∙ {Duplicate}")
+                Logger.Warning(f'∙ {Duplicate}')
 
 Screen = rf'''
 
  __   __     ______     ______     ______   ______     __   __     ______    
-/\ "-.\ \   /\  ___\   /\  __ \   /\  ___\ /\  __ \   /\ "-.\ \   /\  ___\   
+/\ `-.\ \   /\  ___\   /\  __ \   /\  ___\ /\  __ \   /\ `-.\ \   /\  ___\   
 \ \ \-.  \  \ \  __\   \ \ \/\ \  \ \  __\ \ \  __ \  \ \ \-.  \  \ \___  \  
- \ \_\\"\_\  \ \_____\  \ \_____\  \ \_\    \ \_\ \_\  \ \_\\"\_\  \/\_____\ 
+ \ \_\\`\_\  \ \_____\  \ \_____\  \ \_\    \ \_\ \_\  \ \_\\`\_\  \/\_____\ 
   \/_/ \/_/   \/_____/   \/_____/   \/_/     \/_/\/_/   \/_/ \/_/   \/_____/
                                                                                       
-  [bold cyan]Rule34[/bold cyan] | [cornflower_blue]OnlyFans[/cornflower_blue] | [dodger_blue2]Fansly[/dodger_blue2] | [salmon1]Patreon[/salmon1] | [dark_cyan]SubscribeStar[/dark_cyan] | [deep_sky_blue4]E621[/deep_sky_blue4] | [sky_blue1]Fanbox[/sky_blue1] | [hot_pink]Gumroad[/hot_pink]
+  {' | '.join(Config['platform_names'][Platform] for Platform in Config['platform_names'].keys())}
   by [light_coral]https://github.com/Hyphonic[/light_coral] | [white]Version {Config['version']}[/white]
 
 
@@ -654,19 +489,68 @@ Screen = rf'''
 # Fix FavoriteFetcher usage
 async def Main():
     Console(force_terminal=True).print(Screen)
-    try:
-        InitialGlobalLimit = Config['global_limit']
-        CheckForDuplicateIds()
+    CheckForDuplicateIds()
 
-        # Initialize favorites properly
-        await FavoriteFetcher.Create('coomer')
-        await FavoriteFetcher.Create('kemono')
+    Logger.Debug('Fetching Creators:')
 
-        # Fix Fetcher usage
-        Tasks = []
+    # Initialize favorites properly
+    await FavoriteFetcher.Create('coomer')
+    await FavoriteFetcher.Create('kemono')
+
+    for Platform in Config['directory_names'].keys():
+        if Config[Platform]['creator_limit'] > 0:
+            Logger.Info(f'∙ Loaded {len(Config[Platform]['ids'])} creators from {Config['platform_names'][Platform]}')
+    
+    Logger.Info(f'∙ Loaded {sum(len(Config[Platform]['ids']) for Platform in Config['directory_names'].keys())} creators in total')
+
+    Logger.Debug('Loading Cached Hashes:')
+
+    HashManager().LoadCache()
+
+    # Set directory names
+
+    for Platform in Config['directory_names'].keys():
+        Config[Platform]['directory_names'] = [f'{Config['directory_names'][Platform]}/{Name}' for Name in Config[Platform]['names']]
+
+    # Limit the number of creators to fetch
+    for Platform in Config['directory_names'].keys():
+        Config[Platform]['ids'] = Config[Platform]['ids'][:Config['platform_limit_debug']]
+        Config[Platform]['names'] = Config[Platform]['names'][:Config['platform_limit_debug']]
+        Config[Platform]['directory_names'] = Config[Platform]['directory_names'][:Config['platform_limit_debug']]
+        #Logger.Debug(f'∙ {Config['platform_names'][Platform]}: {Config[Platform]['ids']}, {Config[Platform]['names']}, {Config[Platform]['directory_names']}')
+
+    # Initialize progress tracking
+    TotalCreators = sum(len(Config[Platform]['ids']) for Platform in Config['directory_names'].keys())
+    CurrentCreator = 0
+    TotalFilesFetched = 0
+    InitialGlobalLimit = Config['global_limit']
+
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(bar_width=None),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        "•",
+        "{task.fields[creator]}",
+        "•",
+        "{task.fields[progress]}",
+        "•",
+        "{task.fields[files]}",
+        TimeElapsedColumn(),
+        console=Console(force_terminal=True),
+        auto_refresh=False
+    ) as ProgressBar:
+        MainTask = ProgressBar.add_task(
+            "",
+            total=TotalCreators,
+            creator="",
+            progress="0/0",
+            files="0/0"
+        )
+
+        Results = []  # Add this line to store results
         for Platform in Config['directory_names'].keys():
             if Config[Platform]['creator_limit'] > 0:
-                Tuple = list(zip(
+                Tuple = tuple(zip(
                     Config[Platform]['ids'],
                     Config[Platform]['names'],
                     Config[Platform]['directory_names']
@@ -674,46 +558,107 @@ async def Main():
 
                 for Data in Tuple:
                     Id, Name, DirectoryName = Data
+                    CurrentCreator += 1
                     FetcherInstance = Fetcher(
                         Platform=Platform,
                         Id=Id, 
                         Name=Name,
                         DirectoryName=DirectoryName,
-                        CachedHashes=Config['cached_hashes'],
+                        CachedHashes=HashManager().cached_hashes,
                         CreatorLimit=Config[Platform]['creator_limit'],
                         GlobalLimit=Config['global_limit']
                     )
-                    Tasks.append(FetcherInstance.Scrape())
+                    
+                    # Execute Scrape immediately to get file count
+                    GlobalLimit, Result = await FetcherInstance.Scrape()
+                    
+                    # Calculate total files fetched for this creator
+                    CreatorFiles = sum(len(files) for service in Result.values() 
+                                    for creator_files in service.values() 
+                                    for files in [creator_files])
+                    TotalFilesFetched += CreatorFiles
 
-        # Single gather for all tasks
-        Results = await asyncio.gather(*Tasks)
-        
-        # Process results
-        AllFiles = []
-        for GlobalLimit, Result in Results:
-            if Result:
-                for Platform in Result:
-                    for Creator in Result[Platform]:
-                        AllFiles.extend([(FileData, Platform, Creator) 
-                                       for FileData in Result[Platform][Creator]])
+                    ProgressBar.update(
+                        MainTask,
+                        description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                        advance=1,
+                        creator=f"{Name}",
+                        progress=f"{CurrentCreator}/{TotalCreators}",
+                        files=f"{TotalFilesFetched}/{InitialGlobalLimit}",
+                    )
+                    ProgressBar.refresh()
 
-        if AllFiles:
-            Downloader = AsyncDownloadManager(AllFiles)
-            Success = await Downloader.Start()
-            if not Success:
-                Logger.Debug("∙ Hashes have been saved before exiting.")
-                return
+                    # Store result for final processing
+                    Results.append((GlobalLimit, Result))
 
-    except KeyboardInterrupt:
-        Logger.Warning("Interrupted by user")
-    except Exception as Error:
-        Logger.Error(f"Error: {str(Error)}")
-        Logger.Debug("∙ Hashes have been saved before exiting.")
+                    # Results structure:
+                    # [
+                    #     (GlobalLimit, {
+                    #         'platform': {
+                    #             'creator': [
+                    #                 [hash, url, path]
+                    #             ]
+                    #         }
+                    #     })
+                    # ]
+    
+    # Process results
+    AllFiles = []
+    for GlobalLimit, Result in Results:
+        if Result:
+            for Platform in Result:
+                for Creator in Result[Platform]:
+                    AllFiles.extend([(FileData, Platform, Creator) 
+                                    for FileData in Result[Platform][Creator]])
+    
+    # Create directories
+    Directories = [os.path.dirname(File[0][2]) for File in AllFiles]
+    await CreateDirectories(list(set(Directories)))
+
+    # Download files
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(bar_width=None),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        "•",
+        "{task.fields[creator]}",
+        "•",
+        "{task.fields[progress]}",
+        "•",
+        "{task.fields[files]}",
+        TimeElapsedColumn(),
+        console=Console(force_terminal=True),
+        auto_refresh=False
+    ) as ProgressBar:
+        MainTask = ProgressBar.add_task(
+            "",
+            total=len(AllFiles),
+            creator="",
+            progress="0/0",
+            files="0/0"
+        )
+
+        for File in AllFiles:
+            FileData, Platform, Creator = File
+            Downloader = AsyncDownloader(FileData, Platform, Creator)
+            await Downloader.Download()
+
+            ProgressBar.update(
+                MainTask,
+                description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                advance=1,
+                creator=f"{Creator}",
+                progress=f"{ProgressBar.completed}/{ProgressBar.total}",
+                files=f"{ProgressBar.completed}/{ProgressBar.total}",
+            )
+            ProgressBar.refresh()
 
 if __name__ == '__main__':
     try:
         asyncio.run(Main())
     except KeyboardInterrupt:
-        Logger.Warning("Program interrupted by user")
-    except Exception as Error:
-        Logger.Critical(f"Fatal error: {str(Error)}")
+        Logger.Warning('Program interrupted by user')
+    except Exception:
+        Console(force_terminal=True).print_exception()
+    finally:
+        Logger.Info('Exiting program')
