@@ -174,21 +174,40 @@ class HashManager:
     async def SaveHashes(self, new_hashes: Dict[str, Dict[str, list[str]]]):
         '''Save new hashes to the cache file while preserving existing ones.'''
         try:
+            Logger.Debug(f'∙ Saving new hashes: {new_hashes}')  # Debug the incoming hashes
+            Logger.Debug(f'∙ Current cached hashes: {self.cached_hashes}')  # Debug current cache state
+            
             for platform, creators in new_hashes.items():
+                Logger.Debug(f'∙ Processing platform: {platform}')
                 for creator, hashes in creators.items():
+                    Logger.Debug(f'∙ Processing creator: {creator} with hashes: {hashes}')
+                    
                     if platform not in self.cached_hashes:
+                        Logger.Debug(f'∙ Creating new platform entry: {platform}')
                         self.cached_hashes[platform] = {}
+                        
                     if creator not in self.cached_hashes[platform]:
+                        Logger.Debug(f'∙ Creating new creator entry: {creator}')
                         self.cached_hashes[platform][creator] = []
+                    
                     # Only add unique hashes
-                    self.cached_hashes[platform][creator].extend(
-                        hash for hash in hashes 
-                        if hash not in self.cached_hashes[platform][creator]
-                    )
+                    added_hashes = []
+                    for hash in hashes:
+                        if hash not in self.cached_hashes[platform][creator]:
+                            self.cached_hashes[platform][creator].append(hash)
+                            added_hashes.append(hash)
+                    
+                    if added_hashes:
+                        Logger.Debug(f'∙ Added new hashes for {creator}: {added_hashes}')
+
+            Logger.Debug('∙ Writing updated cache to file')
             async with aiofiles.open(self.cache_file, 'w') as f:
                 await f.write(json.dumps(self.cached_hashes, indent=4))
+            Logger.Debug('∙ Cache file updated successfully')
+            
         except Exception as e:
             Logger.Error(f'Failed to save cache: {e}')
+            Logger.Debug(f'Exception details: {str(e)}')
 
     async def HasHash(self, platform: str, creator: str, file_hash: str) -> bool:
         '''Check if a hash exists in the cache.'''
@@ -694,8 +713,11 @@ async def Main():
                 Success = await Downloader.Download()
 
                 if Success:
-                    # Use the global Manager instance
-                    await Manager.SaveHashes({Platform: {Creator: [FileData[0]]}})
+                    try:
+                        Logger.Debug(f'∙ Saving hash for {Platform}/{Creator}: {FileData[0]}')
+                        await Manager.SaveHashes({Platform: {Creator: [FileData[0]]}})
+                    except Exception as e:
+                        Logger.Error(f'Failed to save hash: {e}')
                 
                 CompletedFiles += 1
                 Name = Config[Platform]['names'][Config[Platform]['ids'].index(Creator)]
