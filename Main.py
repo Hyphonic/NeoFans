@@ -668,6 +668,8 @@ async def Main():
             Downloader = AsyncDownloader(FileData, Platform, Creator)
             FileSize = await Downloader.Size()
             TotalBytes += FileSize
+            # Add a small delay to allow progress updates
+            await asyncio.sleep(0)
 
         # Second pass - download files
         for File in AllFiles:
@@ -689,6 +691,8 @@ async def Main():
                 size=f"{HumanizeBytes(DownloadedBytes)}/{HumanizeBytes(TotalBytes)}"
             )
             ProgressBar.refresh()
+            # Add a small delay to allow progress updates
+            await asyncio.sleep(0)
 
 if __name__ == '__main__':
     try:
