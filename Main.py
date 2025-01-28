@@ -133,6 +133,9 @@ class AsyncDownloader:
             #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}: {e}')
             Console(force_terminal=True).print_exception()
             return False
+        except httpx.TimeoutException:
+            #Logger.Error(f'Timeout downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
+            return False
         finally:
             await self.Client.aclose()
     
@@ -675,6 +678,7 @@ async def Main():
                     HashManager().SaveHashes({Platform: {Creator: [FileData[0]]}})
                 
                 CompletedFiles += 1
+                Name = Config[Platform]['names'][Config[Platform]['ids'].index(Creator)]
                 ProgressBar.update(
                     MainTask,
                     description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
