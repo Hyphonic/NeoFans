@@ -683,7 +683,7 @@ async def Main():
                     MainTask,
                     description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
                     advance=1,
-                    creator=f"{Creator}",
+                    creator=f"{Name}",
                     progress=f"{CompletedFiles}/{len(AllFiles)}",
                     size=f"{HumanizeBytes(FileSize)}"
                 )
