@@ -426,7 +426,7 @@ class Fetcher:
                         #Logger.Info(f'Found {_} files')
 
                     else:
-                        #Logger.Error(f'No response or bad status ({StatusCode})')
+                        Logger.Error(f'No response or bad status ({StatusCode})')
                         pass
                         
                 except Exception:
