@@ -656,36 +656,30 @@ async def Main():
             progress="0/0",
             size="0B"
         )
-
         CompletedFiles = 0
+        Semaphore = asyncio.Semaphore(20)
 
-        for File in AllFiles:
-            FileData, Platform, Creator = File
-            Downloader = AsyncDownloader(FileData, Platform, Creator)
-            FileSize = await Downloader.Size()
-            await Downloader.Download()
-            
-            CompletedFiles += 1
-            Semaphore = asyncio.Semaphore(10)
+        async def Worker(File):
+            nonlocal CompletedFiles
+            async with Semaphore:
+                FileData, Platform, Creator = File
+                Downloader = AsyncDownloader(FileData, Platform, Creator)
+                FileSize = await Downloader.Size()
+                Success = await Downloader.Download()
 
-            async def Worker():
-                nonlocal CompletedFiles
-                async with Semaphore:
-                    FileData, Platform, Creator = File
-                    Downloader = AsyncDownloader(FileData, Platform, Creator)
-                    FileSize = await Downloader.Size()
-                    await Downloader.Download()
-                    
-                    CompletedFiles += 1
-                    ProgressBar.update(
-                        MainTask,
-                        description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
-                        advance=1,
-                        creator=f"{Creator}",
-                        progress=f"{CompletedFiles}/{len(AllFiles)}",
-                        size=f"{HumanizeBytes(FileSize)}"
-                    )
-                    ProgressBar.refresh()
+                if Success:
+                    HashManager().SaveHashes({Platform: {Creator: [FileData[0]]}})
+                
+                CompletedFiles += 1
+                ProgressBar.update(
+                    MainTask,
+                    description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                    advance=1,
+                    creator=f"{Creator}",
+                    progress=f"{CompletedFiles}/{len(AllFiles)}",
+                    size=f"{HumanizeBytes(FileSize)}"
+                )
+                ProgressBar.refresh()
                 
             
             Tasks = [Worker(File) for File in AllFiles]
