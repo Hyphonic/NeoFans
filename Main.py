@@ -136,6 +136,12 @@ class AsyncDownloader:
         except httpx.TimeoutException:
             #Logger.Error(f'Timeout downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
             return False
+        except httpx.HTTPStatusError:
+            #Logger.Error(f'HTTP error downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
+            return False
+        except httpx.Timeout:
+            #Logger.Error(f'Timeout downloading {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
+            return False
         finally:
             await self.Client.aclose()
     
