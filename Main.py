@@ -135,6 +135,16 @@ class AsyncDownloader:
             return False
         finally:
             await self.Client.aclose()
+    
+    async def Size(self):
+        try:
+            Response = await self.Client.head(self.Url)
+            if Response.status_code == 200:
+                return int(Response.headers['content-length'])
+            else:
+                return 0
+        except Exception:
+            return 0
 
 class HashManager:
     '''Handles loading and saving cached hashes.'''
@@ -469,6 +479,13 @@ def CheckForDuplicateIds():
             for Duplicate in Duplicates:
                 Logger.Warning(f'∙ {Duplicate}')
 
+def HumanizeBytes(Bytes):
+    if Bytes == 0:
+        return '0 B'
+    Sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB']
+    i = int((Bytes).bit_length() / 10)
+    return f'{round(Bytes / (1 << (i * 10)), 2)} {Sizes[i]}'
+
 Screen = rf'''
 
  __   __     ______     ______     ______   ______     __   __     ______    
@@ -628,7 +645,7 @@ async def Main():
         "•", 
         "{task.fields[progress]}",
         "•",
-        "{task.fields[success]}",
+        "{task.fields[size]}",
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
         auto_refresh=False
@@ -638,18 +655,30 @@ async def Main():
             total=len(AllFiles),
             creator="",
             progress="0/0",
-            success="0/0"
+            size="0B/0B"
         )
 
         CompletedFiles = 0
-        SuccessfulDownloads = 0
+        TotalBytes = 0
+        DownloadedBytes = 0
+
+        # First pass - get total size
         for File in AllFiles:
             FileData, Platform, Creator = File
             Downloader = AsyncDownloader(FileData, Platform, Creator)
+            FileSize = await Downloader.Size()
+            TotalBytes += FileSize
+
+        # Second pass - download files
+        for File in AllFiles:
+            FileData, Platform, Creator = File
+            Downloader = AsyncDownloader(FileData, Platform, Creator)
+            FileSize = await Downloader.Size()
             Success = await Downloader.Download()
             
             CompletedFiles += 1
-            SuccessfulDownloads += 1 if Success else 0
+            if Success:
+                DownloadedBytes += FileSize
 
             ProgressBar.update(
                 MainTask,
@@ -657,7 +686,7 @@ async def Main():
                 advance=1,
                 creator=f"{Creator}",
                 progress=f"{CompletedFiles}/{len(AllFiles)}",
-                success=f"{SuccessfulDownloads}/{CompletedFiles}"
+                size=f"{HumanizeBytes(DownloadedBytes)}/{HumanizeBytes(TotalBytes)}"
             )
             ProgressBar.refresh()
 
