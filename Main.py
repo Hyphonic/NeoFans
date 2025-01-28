@@ -197,7 +197,7 @@ class HashManager:
         return False
 
 class Fetcher:
-    def __init__(self, Platform, Id, Name, DirectoryName, CachedHashes, CreatorLimit, GlobalLimit):
+    def __init__(self, Platform, Id, Name, DirectoryName, HashManager, CreatorLimit, GlobalLimit):
         self.Page = 0
         self.Client = httpx.AsyncClient()
         
@@ -206,13 +206,13 @@ class Fetcher:
         self.Id = Id
         self.Name = Name
         self.DirectoryName = DirectoryName
-        self.CachedHashes = CachedHashes
         self.CreatorLimit = CreatorLimit
         self.GlobalLimit = GlobalLimit
         self.Result = {self.Platform: {self.Id: []}}
         self.FilesDownloaded = 0
 
-        self.CachedHashes = CachedHashes
+        self.HashManager = HashManager
+        self.LastPage = 0  # Track last visited page
 
         self.Params = None
 
@@ -261,6 +261,7 @@ class Fetcher:
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['pid'] = self.Page
+                self.LastPage = self.Page + 1  # Rule34 uses 0-based indexing
                 ReEncodedParams = urllib.parse.urlencode(BaseParams, safe='+')
                 Response, StatusCode = await self.FetchUrl('https://api.rule34.xxx/index.php', ReEncodedParams)
                 
@@ -302,7 +303,7 @@ class Fetcher:
                         else:
                             #Logger.Error(f'No data at page {self.Page+1}')
                             break
-                except Exception as e:
+                except Exception:
                     #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
@@ -318,6 +319,7 @@ class Fetcher:
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['page'] = self.Page + 1
+                self.LastPage = self.Page + 1  # e621 uses 1-based indexing
                 ReEncodedParams = urllib.parse.urlencode(BaseParams, safe='+')
                 Response, StatusCode = await self.FetchUrl('https://e621.net/posts.json', ReEncodedParams)
                 
@@ -357,7 +359,7 @@ class Fetcher:
                         #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
                         break
                         
-                except Exception as e:
+                except Exception:
                     #Logger.Error(f'Error processing page {self.Page+1}: {e}')
                     break
 
@@ -372,62 +374,66 @@ class Fetcher:
 
         else:
             Hoster = 'coomer' if self.Platform in ['onlyfans', 'fansly'] else 'kemono'
-            Response, StatusCode = await self.FetchUrl(f'https://{Hoster}.su/api/v1/{self.Platform}/user/{self.Id}')
-            
-            try:
-                if Response and isinstance(Response, list):  # Change here - response is a list     
-                    _ = 0
-                    for Post in Response:
-                        if self.GlobalLimit > 0 and self.CreatorLimit > 0:
-                            # Handle attachments
-                            for Attachment in Post.get('attachments', []):
-                                if self.GlobalLimit <= 0 or self.CreatorLimit <= 0:
-                                    break
+            while self.GlobalLimit > 0 and self.CreatorLimit > 0:
+                self.LastPage = self.Page  # These platforms use offset-based pagination
+                Response, StatusCode = await self.FetchUrl(f'https://{Hoster}.su/api/v1/{self.Platform}/user/{self.Id}?o={self.Page}')
+                
+                try:
+                    if Response and isinstance(Response, list):  # Change here - response is a list     
+                        _ = 0
+                        for Post in Response:
+                            if self.GlobalLimit > 0 and self.CreatorLimit > 0:
+                                # Handle attachments
+                                for Attachment in Post.get('attachments', []):
+                                    if self.GlobalLimit <= 0 or self.CreatorLimit <= 0:
+                                        break
+                                        
+                                    FileUrl = f'https://{Hoster}.su{Attachment.get('path')}'
+                                    FileHash = self.ExtractHash(FileUrl)
                                     
-                                FileUrl = f'https://{Hoster}.su{Attachment.get('path')}'
-                                FileHash = self.ExtractHash(FileUrl)
-                                
-                                if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
-                                    continue
+                                    if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                        #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
+                                        continue
 
-                                if FileHash:
-                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
-                                    FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
-                                    self.Result[self.Platform][self.Id].append(FileData)
-                                    self.GlobalLimit -= 1
-                                    self.CreatorLimit -= 1
-                                    self.FilesDownloaded += 1
-                                    _ += 1
+                                    if FileHash:
+                                        #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
+                                        FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
+                                        self.Result[self.Platform][self.Id].append(FileData)
+                                        self.GlobalLimit -= 1
+                                        self.CreatorLimit -= 1
+                                        self.FilesDownloaded += 1
+                                        _ += 1
 
-                            # Handle main file
-                            File = Post.get('file', {})
-                            if File:
-                                FileUrl = f'https://{Hoster}.su{File.get('path')}'
-                                FileHash = self.ExtractHash(FileUrl)
-                                
-                                if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
-                                    continue
+                                # Handle main file
+                                File = Post.get('file', {})
+                                if File:
+                                    FileUrl = f'https://{Hoster}.su{File.get('path')}'
+                                    FileHash = self.ExtractHash(FileUrl)
+                                    
+                                    if FileHash and await HashManager().HasHash(self.Platform, self.Id, FileHash):
+                                        #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
+                                        continue
 
-                                if FileHash:
-                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
-                                    FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
-                                    self.Result[self.Platform][self.Id].append(FileData)
-                                    self.GlobalLimit -= 1
-                                    self.CreatorLimit -= 1 
-                                    self.FilesDownloaded += 1
-                                    _ += 1
+                                    if FileHash:
+                                        #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
+                                        FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
+                                        self.Result[self.Platform][self.Id].append(FileData)
+                                        self.GlobalLimit -= 1
+                                        self.CreatorLimit -= 1 
+                                        self.FilesDownloaded += 1
+                                        _ += 1
 
-                    #Logger.Info(f'Found {_} files')
+                        #Logger.Info(f'Found {_} files')
 
-                else:
-                    #Logger.Error(f'No response or bad status ({StatusCode})')
+                    else:
+                        #Logger.Error(f'No response or bad status ({StatusCode})')
+                        pass
+                        
+                except Exception:
+                    #Logger.Error(f'Error processing page: {e}')
                     pass
-                    
-            except Exception as e:
-                #Logger.Error(f'Error processing page: {e}')
-                pass
+
+                self.Page += 50
 
         if self.GlobalLimit <= 0:
             #Logger.Info('Global limit reached')
@@ -557,25 +563,28 @@ async def Main():
     InitialGlobalLimit = Config['global_limit']
 
     with Progress(
-        "[progress.description]{task.description}",
+        '[progress.description]{task.description}',
         BarColumn(bar_width=None),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        "•",
-        "{task.fields[creator]}",
-        "•",
-        "{task.fields[progress]}",
-        "•",
-        "{task.fields[files]}",
+        '[progress.percentage]{task.percentage:>3.0f}%',
+        '•',
+        '{task.fields[creator]}',
+        '•',
+        '{task.fields[progress]}',
+        '•',
+        '{task.fields[files]}',
+        '•',
+        '{task.fields[page]}',  # Add page display
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
         auto_refresh=False
     ) as ProgressBar:
         MainTask = ProgressBar.add_task(
-            "",
+            '',
             total=TotalCreators,
-            creator="",
-            progress="0/0",
-            files="0/0"
+            creator='',
+            progress='0/0',
+            files='0/0',
+            page='Page 0'
         )
 
         Results = []  # Add this line to store results
@@ -595,13 +604,18 @@ async def Main():
                         Id=Id, 
                         Name=Name,
                         DirectoryName=DirectoryName,
-                        CachedHashes=HashManager().cached_hashes,
+                        HashManager=Manager,  # Pass Manager instance
                         CreatorLimit=Config[Platform]['creator_limit'],
                         GlobalLimit=Config['global_limit']
                     )
                     
-                    # Execute Scrape immediately to get file count
-                    GlobalLimit, Result = await FetcherInstance.Scrape()
+                    GlobalLimit, Result, LastPage = await FetcherInstance.Scrape()
+
+                    # Format page display based on platform
+                    PageDisplay = (
+                        f'Page {LastPage}' if Platform in ['rule34', 'e621']
+                        else f'Offset {LastPage}'
+                    )
                     
                     # Calculate total files fetched for this creator
                     CreatorFiles = sum(len(files) for service in Result.values() 
@@ -611,11 +625,12 @@ async def Main():
 
                     ProgressBar.update(
                         MainTask,
-                        description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                        description=f'[blue]{Config['platform_names'][Platform]}[/blue]',
                         advance=1,
-                        creator=f"{Name}",
-                        progress=f"{CurrentCreator}/{TotalCreators}",
-                        files=f"{TotalFilesFetched}/{InitialGlobalLimit}",
+                        creator=f'{Name}',
+                        progress=f'{CurrentCreator}/{TotalCreators}',
+                        files=f'{TotalFilesFetched}/{InitialGlobalLimit}',
+                        page=PageDisplay
                     )
                     ProgressBar.refresh()
 
@@ -648,15 +663,15 @@ async def Main():
 
     # Download files
     with Progress(
-        "[progress.description]{task.description}",
+        '[progress.description]{task.description}',
         BarColumn(bar_width=None),
-        "[progress.percentage]{task.percentage:>3.0f}%",
-        "•",
-        "{task.fields[creator]}",
-        "•", 
-        "{task.fields[progress]}",
-        "•",
-        "{task.fields[size]}",
+        '[progress.percentage]{task.percentage:>3.0f}%',
+        '•',
+        '{task.fields[creator]}',
+        '•', 
+        '{task.fields[progress]}',
+        '•',
+        '{task.fields[size]}',
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
     ) as ProgressBar:
@@ -686,11 +701,11 @@ async def Main():
                 Name = Config[Platform]['names'][Config[Platform]['ids'].index(Creator)]
                 ProgressBar.update(
                     MainTask,
-                    description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
+                    description=f'[blue]{Config['platform_names'][Platform]}[/blue]',
                     advance=1,
-                    creator=f"{Name}",
-                    progress=f"{CompletedFiles}/{len(AllFiles)}",
-                    size=f"{HumanizeBytes(FileSize)}"
+                    creator=f'{Name}',
+                    progress=f'{CompletedFiles}/{len(AllFiles)}',
+                    size=f'{HumanizeBytes(FileSize)}'
                 )
                 ProgressBar.refresh()
                 
