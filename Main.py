@@ -443,7 +443,7 @@ class Fetcher:
             pass
 
         await self.Client.aclose()
-        return self.GlobalLimit, self.Result
+        return self.GlobalLimit, self.Result, self.LastPage
 
 async def CreateDirectories(Directories):
     with Progress(
