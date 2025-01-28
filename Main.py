@@ -123,13 +123,16 @@ class AsyncDownloader:
             if Response.status_code == 200:
                 async with aiofiles.open(self.Path, 'wb') as f:
                     await f.write(Response.content)
+                return True
                 #Logger.Debug(f'∙ Downloaded {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
             else:
                 pass
+                return False
                 #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform} ({Response.status_code})')
         except Exception as e:
             #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}: {e}')
             Console(force_terminal=True).print_exception()
+            return False
         finally:
             await self.Client.aclose()
 
@@ -622,10 +625,10 @@ async def Main():
         "[progress.percentage]{task.percentage:>3.0f}%",
         "•",
         "{task.fields[creator]}",
-        "•",
+        "•", 
         "{task.fields[progress]}",
         "•",
-        "{task.fields[files]}",
+        "{task.fields[success]}",
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
         auto_refresh=False
@@ -635,21 +638,26 @@ async def Main():
             total=len(AllFiles),
             creator="",
             progress="0/0",
-            files="0/0"
+            success="0/0"
         )
 
+        CompletedFiles = 0
+        SuccessfulDownloads = 0
         for File in AllFiles:
             FileData, Platform, Creator = File
             Downloader = AsyncDownloader(FileData, Platform, Creator)
-            await Downloader.Download()
+            Success = await Downloader.Download()
+            
+            CompletedFiles += 1
+            SuccessfulDownloads += 1 if Success else 0
 
             ProgressBar.update(
                 MainTask,
                 description=f"[blue]{Config['platform_names'][Platform]}[/blue]",
                 advance=1,
                 creator=f"{Creator}",
-                progress=f"{ProgressBar.completed}/{ProgressBar.total}",
-                files=f"{ProgressBar.completed}/{ProgressBar.total}",
+                progress=f"{CompletedFiles}/{len(AllFiles)}",
+                success=f"{SuccessfulDownloads}/{CompletedFiles}"
             )
             ProgressBar.refresh()
 
