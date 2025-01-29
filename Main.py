@@ -194,6 +194,8 @@ class HashManager:
                 if Creator not in self.CachedHashes[Platform]:
                     self.CachedHashes[Platform][Creator] = []
                 self.CachedHashes[Platform][Creator].extend(NewHashes[Platform][Creator])
+        
+        await aiofiles.open(self.CacheFile, 'w').write(json.dumps(self.CachedHashes, indent=4))
     
     async def HasHash(self, Platform: str, Creator: str, Hash: str) -> bool:
         '''Check if a hash is already cached.'''

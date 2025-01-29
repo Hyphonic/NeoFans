@@ -1,6 +1,6 @@
 {
     "rule34": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [
             "liepraag",
             "jackerman",
@@ -1979,31 +1979,31 @@
         ]
     },
     "onlyfans": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
     },
     "fansly": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
     },
     "patreon": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
     },
     "subscribestar": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
     },
     "e621": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [
             "floppyhuman",
             "xlkev",
@@ -2243,13 +2243,13 @@
         ]
     },
     "fanbox": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
     },
     "gumroad": {
-        "creator_limit": 1000,
+        "creator_limit": 50,
         "ids": [],
         "names": [],
         "directory_names": []
@@ -2287,7 +2287,7 @@
         "fanbox": true,
         "gumroad": true
     },
-    "global_limit": 5000,
+    "global_limit": 200,
     "platform_limit_debug": 1,
     "cached_hashes": {},
     "version": "3.0.2",
