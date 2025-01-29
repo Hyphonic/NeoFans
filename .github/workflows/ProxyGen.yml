@@ -25,3 +25,13 @@ jobs:
             - name: 🔑 Generate Proxies
               run: |
                   python ProxyChecker.py
+            
+            - name: 🔼 Commit Proxies
+              if: success()
+              run: |
+                git config user.name "GitHub Actions"
+                git config user.email "actions@github.com"
+                git pull
+                git add --all
+                git commit -m "Update Proxies 🔼"
+                git push
