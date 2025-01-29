@@ -420,7 +420,7 @@ class Fetcher:
                                         continue
 
                                     if FileHash:
-                                        #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
+                                        Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                         FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                         self.Result[self.Platform][self.Id].append(FileData)
                                         self.GlobalLimit -= 1
@@ -687,6 +687,9 @@ async def Main():
                     AllFiles.extend([(FileData, Platform, Creator) 
                                     for FileData in Result[Platform][Creator]])
     
+    # Relimit the number of files to download
+    AllFiles = AllFiles[:Config['global_limit']]
+    
     Logger.Info(f'∙ Found {len(AllFiles)} new files to download')
     
     # Create directories
@@ -748,17 +751,16 @@ async def Main():
                     size=f'{HumanizeBytes(FileSize)}'
                 )
                 ProgressBar.refresh()
-                
             
         Tasks = [Worker(File) for File in AllFiles]
         await asyncio.gather(*Tasks)
 
         # Save all hashes at once after downloads complete
-        Logger.Debug("Successfully downloaded files:")
+        Logger.Debug('\nSuccessfully downloaded files:')
         for Platform in SuccessfulDownloads:
             for Creator, Hashes in SuccessfulDownloads[Platform].items():
                 if Hashes:  # Only log/save non-empty hash lists
-                    Logger.Debug(f"∙ {Platform}/{Creator}: {Hashes}")
+                    Logger.Debug(f'∙ {Platform}/{Creator}: {Hashes}')
                     await Manager.SaveHashes({Platform: {Creator: Hashes}})
 
 if __name__ == '__main__':
