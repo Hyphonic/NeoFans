@@ -138,6 +138,7 @@ class AsyncDownloader:
                         os.remove(self.PartialPath)
                     return False
             else:
+                Logger.Debug(f'Failed to download {self.Hash} from {self.Url} ({Response.status_code})')
                 return False
 
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
@@ -735,11 +736,10 @@ async def Main():
                 FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
-                Logger.Debug(f'∙ {Success} | {FileData[0]} | {FileData[1]} | {FileData[2]}')
+                Logger.Debug(f'\n\n∙ {Success} \n\n')
 
                 if Success:
                     # Store successful download
-                    Logger.Debug(f'∙ Downloaded {FileData[0]}, appending to {Platform}/{Creator}')
                     SuccessfulDownloads[Platform][Creator].append(FileData[0])
                 
                 CompletedFiles += 1
