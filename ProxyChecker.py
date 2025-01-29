@@ -54,26 +54,37 @@ Logger = RichLogger()
 
 class ModernBroker(BaseBroker):
     def __init__(self, queue=None):
+        self._max_conn = 200  # Set before super init
         super().__init__(queue)
         self._on_check = asyncio.Queue(maxsize=self._max_conn)
+        self._to_check = asyncio.Queue(maxsize=self._max_conn)
+        self._checked = asyncio.Queue(maxsize=self._max_conn)
 
 async def Show(Proxies, ProgressBar, Task):
     count = 0
-    while True:
-        try:
-            Proxy = await Proxies.get()
-            if Proxy is None:
-                break
-            
-            count += 1
-            ProgressBar.update(Task, advance=1)
-            
-            os.makedirs('proxies', exist_ok=True)
-            async with aiofiles.open('proxies/socks5.txt', 'a') as f:
+    os.makedirs('proxies', exist_ok=True)
+    
+    # Open file once outside loop
+    async with aiofiles.open('proxies/socks5.txt', 'a') as f:
+        while True:
+            try:
+                Proxy = await asyncio.wait_for(Proxies.get(), timeout=5.0)
+                if Proxy is None:
+                    break
+                
+                count += 1
+                ProgressBar.update(Task, 
+                    advance=1,
+                    description=f'[blue]Found {count} Proxies[/blue]'
+                )
+                
                 await f.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
-            
-        except Exception as e:
-            Logger.Error(f'Error processing proxy: {e}')
+                await f.flush()  # Ensure writing to disk
+                
+            except asyncio.TimeoutError:
+                break
+            except Exception as e:
+                Logger.Error(f'Error processing proxy: {e}')
 
 async def Main():
     Logger.Info('Starting Proxy Checker')
