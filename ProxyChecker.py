@@ -4,6 +4,7 @@ import httpx
 import time
 import os
 import asyncio
+from rich.progress import Progress, BarColumn, TimeElapsedColumn
 
 LogLevel = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -51,91 +52,146 @@ Screen = r'''
                                                      
 '''
 
+TEST_SITES = [
+    'http://www.google.com',
+    'http://www.amazon.com',
+    'http://www.github.com',
+    'http://www.cloudflare.com',
+    'http://www.reddit.com'
+]
+
 class ProxyChecker:
-    def __init__(self, ProxyUrls: Dict[str, List[str]], Timeout: int = 1, MaxRetries: int = 3, RetryDelay: float = 1.0, MaxWorkers: int = 20):
-        self.ProxyUrls = ProxyUrls  # Dict[str, List[str]]
-        self.Timeout = Timeout
-        self.MaxRetries = MaxRetries
-        self.RetryDelay = RetryDelay
-        self.MaxWorkers = MaxWorkers
-        self.TotalProxiesChecked = 0
-        self.WorkingProxiesFound = 0
-        self.Client = httpx.AsyncClient()
+    def __init__(self, max_workers: int = 100):
+        self.Semaphore = asyncio.Semaphore(max_workers)
+        self.WorkingProxies: Dict[str, List[str]] = {
+            'http': [],
+            'socks5': []
+        }
+        self.TotalChecked = 0
+        self.TotalWorking = 0
 
-    async def CheckProxy(self, Proxy: str, ProxyType: str) -> Optional[str]:
-        try:
-            async with httpx.AsyncClient(proxy=Proxy, timeout=self.Timeout) as client:
-                Response = await client.get('http://www.google.com')
-                if Response.status_code == 200:
-                    return Proxy
-        except httpx.RequestError:
-            return None
+    async def FetchProxies(self, urls: List[str]) -> List[str]:
+        AllProxies = []
+        async with httpx.AsyncClient(timeout=10.0) as Client:
+            for Url in urls:
+                try:
+                    Response = await Client.get(Url)
+                    if Response.status_code == 200:
+                        Proxies = Response.text.strip().split('\n')
+                        AllProxies.extend([Proxy.strip() for Proxy in Proxies if Proxy.strip()])
+                except Exception as e:
+                    Logger.error(f"Failed to fetch proxies from {Url}: {e}")
+        return list(set(AllProxies))
 
-    async def GetProxies(self, Url: str) -> List[str]:
-        for Attempt in range(self.MaxRetries):
+    async def CheckProxy(self, Proxy: str, ProxyType: str, ProgressBar, Task):
+        TestSite = TEST_SITES[int(time.time()) % len(TEST_SITES)]
+        FormattedProxy = f"{ProxyType}://{Proxy}"
+        
+        async with self.Semaphore:
             try:
-                Response = await self.Client.get(Url)
-                Response.raise_for_status()
-                return Response.text.strip().splitlines()
-            except httpx.RequestError as E:
-                Logger.warning(f"∙ Attempt {Attempt + 1} failed to retrieve proxies from {Url}: {E}")
-                await asyncio.sleep(self.RetryDelay)
-        Logger.error(f"Failed to retrieve proxies from {Url} after {self.MaxRetries} attempts")
-        return []
+                async with httpx.AsyncClient(
+                    proxy=FormattedProxy,
+                    timeout=10.0,
+                    follow_redirects=True
+                ) as Client:
+                    StartTime = time.time()
+                    Response = await Client.get(TestSite)
+                    Latency = int((time.time() - StartTime) * 1000)  # Convert to ms
+                    
+                    self.TotalChecked += 1
+                    if Response.status_code == 200:
+                        self.WorkingProxies[ProxyType].append(FormattedProxy)
+                        self.TotalWorking += 1
+                        
+                        ProgressBar.update(
+                            Task,
+                            description=f"[blue]{ProxyType.upper()}[/blue]",
+                            advance=1,
+                            proxy=FormattedProxy,
+                            stats=f"{self.TotalWorking}/{self.TotalChecked}",
+                            latency=f"{Latency}ms",
+                            status="[green]Working[/green]"
+                        )
+                    else:
+                        ProgressBar.update(
+                            Task,
+                            description=f"[blue]{ProxyType.upper()}[/blue]",
+                            advance=1,
+                            proxy=FormattedProxy,
+                            stats=f"{self.TotalWorking}/{self.TotalChecked}",
+                            latency=f"{Latency}ms",
+                            status=f"[red]Bad Status: {Response.status_code}[/red]"
+                        )
+                    ProgressBar.refresh()
+                        
+            except Exception as e:
+                self.TotalChecked += 1
+                ProgressBar.update(
+                    Task,
+                    description=f"[blue]{ProxyType.upper()}[/blue]",
+                    advance=1,
+                    proxy=FormattedProxy,
+                    stats=f"{self.TotalWorking}/{self.TotalChecked}",
+                    latency="N/A",
+                    status="[red]Failed[/red]"
+                )
+                ProgressBar.refresh()
 
-    @staticmethod
-    def CreateProxyDir(Directory: str) -> None:
-        os.makedirs(Directory, exist_ok=True)
+    async def SaveProxies(self):
+        os.makedirs('proxies', exist_ok=True)
+        for ProxyType, Proxies in self.WorkingProxies.items():
+            if Proxies:
+                async with aiofiles.open(f'proxies/{ProxyType}.txt', 'w') as f:
+                    await f.write('\n'.join(Proxies))
+                Logger.info(f"Saved {len(Proxies)} {ProxyType} proxies")
 
-    async def ProcessProxies(self, ProxyType: str, Url: str) -> None:
-        ProxyDir = f'proxies/{ProxyType}.txt'
-        self.CreateProxyDir(os.path.dirname(ProxyDir))
-        Proxies = await self.GetProxies(Url)
-        TotalProxies = len(Proxies)
-        
-        if not Proxies:
-            Logger.warning(f"No proxies to check for {ProxyType} from {Url}")
-            return
-        
-        Logger.info(f"Checking {TotalProxies} {ProxyType} proxies from {Url} using {self.MaxWorkers} workers")
-
-        WorkingProxies = []
-        Tasks = [self.CheckProxy(Proxy, ProxyType) for Proxy in Proxies]
-        for Task in asyncio.as_completed(Tasks):
-            Result = await Task
-            if Result:
-                WorkingProxies.append(Result)
-
-        try:
-            with open(ProxyDir, 'a') as File:  # Append to avoid overwriting
-                File.write('\n'.join(WorkingProxies) + '\n')
-        except OSError as E:
-            Logger.error(f"Failed to write working proxies to {ProxyDir}: {E}")
-
-        Logger.info(f"∙ Found {len(WorkingProxies)} working {ProxyType} proxies out of {TotalProxies} from {Url}")
-        self.TotalProxiesChecked += TotalProxies
-        self.WorkingProxiesFound += len(WorkingProxies)
-
-    async def Run(self) -> None:
-        StartTime = time.time()
-        
-        try:
+async def Main():
+    Console(force_terminal=True).print(Screen)
+    Checker = ProxyChecker()
+    
+    with Progress(
+        "[progress.description]{task.description}",
+        BarColumn(bar_width=None),
+        "[progress.percentage]{task.percentage:>3.0f}%",
+        "•",
+        "{task.fields[proxy]}",
+        "•",
+        "{task.fields[stats]}",
+        "•",
+        "{task.fields[latency]}",
+        "•",
+        "{task.fields[status]}",
+        TimeElapsedColumn(),
+        console=Console(force_terminal=True),
+        auto_refresh=False
+    ) as ProgressBar:
+        for ProxyType, Urls in ProxyUrls.items():
+            Logger.info(f"Fetching {ProxyType} proxies...")
+            RawProxies = await Checker.FetchProxies(Urls)
+            Logger.info(f"Found {len(RawProxies)} {ProxyType} proxies to check")
+            
+            Task = ProgressBar.add_task(
+                "",
+                total=len(RawProxies),
+                proxy="",
+                stats="0/0",
+                latency="0ms",
+                status=""
+            )
+            
             Tasks = []
-            for ProxyType, Urls in self.ProxyUrls.items():
-                for Url in Urls:
-                    Tasks.append(self.ProcessProxies(ProxyType, Url))
+            for Proxy in RawProxies:
+                if ProxyType == 'http' and 'https://' in Proxy:
+                    Proxy = Proxy.replace('https://', 'http://')
+                Tasks.append(Checker.CheckProxy(Proxy, ProxyType, ProgressBar, Task))
+            
+            Logger.info(f"Checking {ProxyType} proxies...")
             await asyncio.gather(*Tasks)
-        except KeyboardInterrupt:
-            Logger.warning("Process interrupted by user")
-        finally:
-            await self.Client.aclose()
 
-        EndTime = time.time()
-        ExecutionTime = EndTime - StartTime
-        Minutes, Seconds = divmod(ExecutionTime, 60)
-        Logger.info(f"Total proxies checked: {self.TotalProxiesChecked}")
-        Logger.info(f"Working proxies found: {self.WorkingProxiesFound}")
-        Logger.info(f"Execution time: {int(Minutes)}m {int(Seconds)}s")
+    await Checker.SaveProxies()
+    Logger.info("Proxy check completed!")
+    for ProxyType, Proxies in Checker.WorkingProxies.items():
+        Logger.info(f"Working {ProxyType} proxies: {len(Proxies)}")
 
 if __name__ == "__main__":
     ProxyUrls = {
@@ -143,15 +199,18 @@ if __name__ == "__main__":
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt",
             "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt"
         ],
-        "socks4": [
-            "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks4.txt",
-            "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt"
-        ],
         "socks5": [
             "https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/socks5.txt",
             "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt"
         ]
     }
     Console(force_terminal=True).print(Screen)
-    Checker = ProxyChecker(ProxyUrls, MaxWorkers=150)
-    asyncio.run(Checker.Run())
+    import aiofiles
+    try:
+        asyncio.run(Main())
+    except KeyboardInterrupt:
+        Logger.warning("Program interrupted by user")
+    except Exception as e:
+        Console(force_terminal=True).print_exception()
+    finally:
+        Logger.info("Exiting program")

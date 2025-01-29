@@ -5,6 +5,7 @@ from typing import Dict
 import urllib.parse
 import aiofiles
 import asyncio
+import random
 import httpx
 import json
 import os
@@ -113,7 +114,12 @@ class AsyncDownloader:
         self.Path = FileData[2]
         self.Platform = Platform
         self.Creator = Creator
-        self.Client = httpx.AsyncClient()
+        try:
+                ProxyType = random.choice(['http', 'socks5'])
+                Proxy = random.choice(open(f'proxies/{ProxyType}.txt').read().splitlines())
+        except Exception:
+            pass
+        self.Client = httpx.AsyncClient(proxy=Proxy, timeout=30.0)
 
         self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
         self.PartialPath = f'{self.FullPath}.partial'
