@@ -116,19 +116,30 @@ class AsyncDownloader:
         self.Client = httpx.AsyncClient()
 
         self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
+        self.PartialPath = f'{self.FullPath}.partial'
 
     async def Download(self):
         try:
             Response = await self.Client.get(self.Url)
             if Response.status_code == 200:
-                async with aiofiles.open(self.Path, 'wb') as f:
+                # Download to .partial file first
+                async with aiofiles.open(self.PartialPath, 'wb') as f:
                     await f.write(Response.content)
-                return True
-                #Logger.Debug(f'∙ Downloaded {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform}')
+                
+                try:
+                    # Rename to final filename if download successful
+                    if os.path.exists(self.PartialPath):
+                        os.rename(self.PartialPath, self.FullPath)
+                        return True
+                except Exception as e:
+                    Logger.Error(f'Failed to rename {self.PartialPath}: {e}')
+                    # Clean up partial file on rename failure
+                    if os.path.exists(self.PartialPath):
+                        os.remove(self.PartialPath)
+                    return False
             else:
-                pass
                 return False
-                #Logger.Error(f'Failed to download {self.Hash[:40]}⋯ from {self.Creator} on {self.Platform} ({Response.status_code})')
+
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
             return False
         except Exception as e:
@@ -136,6 +147,9 @@ class AsyncDownloader:
                 Console(force_terminal=True).print_exception(max_frames=1)
             return False
         finally:
+            # Clean up partial file on any other failure
+            if os.path.exists(self.PartialPath) and not os.path.exists(self.FullPath):
+                os.remove(self.PartialPath)
             await self.Client.aclose()
     
     async def Size(self):
@@ -246,8 +260,8 @@ class Fetcher:
             return None, None
 
     async def Scrape(self):
-        Logger.Debug(f'\n∙ Scraping {self.Platform} for {self.Name}')
-        Logger.Debug(f'∙ Creator Limit: {self.CreatorLimit} | Global Limit: {self.GlobalLimit}\n')
+        #Logger.Debug(f'\n∙ Scraping {self.Platform} for {self.Name}')
+        #Logger.Debug(f'∙ Creator Limit: {self.CreatorLimit} | Global Limit: {self.GlobalLimit}\n')
         if self.Platform == 'rule34':
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
@@ -259,10 +273,10 @@ class Fetcher:
                 try:
                     _ = 0
                     if Response:
-                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
+                        #Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         Data = Response
                         if not Data or (isinstance(Data, list) and len(Data) == 0):
-                            Logger.Error(f'No data at page {self.Page+1}')
+                            #Logger.Error(f'No data at page {self.Page+1}')
                             break
                         
                         for Post in Data:
@@ -271,11 +285,11 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
 
                                 if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
-                                    Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
+                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
-                                    Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
+                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -284,9 +298,9 @@ class Fetcher:
                                     _ += 1
                         
                         if _ < self.ParamsLimit:
-                            Logger.Info(f'Page {self.Page+1} → {_} files')
+                            #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
-                        Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
                         if StatusCode != 200:
                             #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
@@ -318,7 +332,7 @@ class Fetcher:
                 
                 try:
                     if Response and 'posts' in Response:
-                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
+                        #Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         Posts = Response['posts']
                         if not Posts or len(Posts) == 0:
                             break
@@ -348,7 +362,7 @@ class Fetcher:
                             #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
 
-                        Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
                         #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
                         break
@@ -374,7 +388,7 @@ class Fetcher:
                 
                 try:
                     if Response and isinstance(Response, list):  # Change here - response is a list     
-                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
+                        #Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         _ = 0
                         for Post in Response:
                             if self.GlobalLimit > 0 and self.CreatorLimit > 0:
@@ -428,7 +442,7 @@ class Fetcher:
                         #Logger.Info(f'Page {self.Page} → {_} files')
                         break
 
-                    Logger.Info(f'Page {self.Page} → {self.FilesDownloaded} files')
+                    #Logger.Info(f'Page {self.Page} → {self.FilesDownloaded} files')
                         
                 except Exception:
                     #Logger.Error(f'Error processing page: {e}')
@@ -688,6 +702,10 @@ async def Main():
         CompletedFiles = 0
         PlatformsHandled = []
         Semaphore = asyncio.Semaphore(Config['threads']['max_workers'])
+        
+        # Track successful downloads
+        SuccessfulDownloads = {Platform: {Creator: [] for Creator in Config[Platform]['ids']} 
+                             for Platform in Config['directory_names'].keys()}
 
         async def Worker(File):
             nonlocal CompletedFiles
@@ -695,17 +713,14 @@ async def Main():
                 FileData, Platform, Creator = File
                 if Platform not in PlatformsHandled:
                     PlatformsHandled.append(Platform)
-                    Logger.Info(f'∙ Downloading files from {Config['platform_names'][Platform]}')
+                
                 Downloader = AsyncDownloader(FileData, Platform, Creator)
                 FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
                 if Success:
-                    try:
-                        Logger.Debug(f'∙ Saving hash for {Platform}/{Creator}: {FileData[0]}')
-                        await Manager.SaveHashes({Platform: {Creator: [FileData[0]]}})
-                    except Exception as e:
-                        Logger.Error(f'Failed to save hash: {e}')
+                    # Store successful download
+                    SuccessfulDownloads[Platform][Creator].append(FileData[0])
                 
                 CompletedFiles += 1
                 Name = Config[Platform]['names'][Config[Platform]['ids'].index(Creator)]
@@ -722,6 +737,14 @@ async def Main():
             
         Tasks = [Worker(File) for File in AllFiles]
         await asyncio.gather(*Tasks)
+
+        # Save all hashes at once after downloads complete
+        Logger.Debug("Successfully downloaded files:")
+        for Platform in SuccessfulDownloads:
+            for Creator, Hashes in SuccessfulDownloads[Platform].items():
+                if Hashes:  # Only log/save non-empty hash lists
+                    Logger.Debug(f"∙ {Platform}/{Creator}: {Hashes}")
+                    await Manager.SaveHashes({Platform: {Creator: Hashes}})
 
 if __name__ == '__main__':
     try:
