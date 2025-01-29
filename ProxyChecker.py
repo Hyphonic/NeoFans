@@ -1,5 +1,4 @@
 from rich.console import Console
-from proxybroker import Broker
 import aiofiles
 import asyncio
 import os
@@ -63,16 +62,19 @@ async def Show(Proxies, ProxyType):
                 except Exception as e:
                     Logger.Error(f'Error processing {ProxyType} proxy: {str(e)}')
                     continue
-                    
-    except Exception as e:
-        Logger.Error(f'Failed to save {ProxyType} proxies: {str(e)}')
-                
     except Exception as e:
         Logger.Error(f'Failed to save {ProxyType} proxies: {str(e)}')
 
 async def Main():
     for ProxyType in ['SOCKS5']:
         Proxies = asyncio.Queue()
+        # Create Broker without loop parameter
+        from proxybroker.api import Broker as BaseBroker
+        class Broker(BaseBroker):
+            def __init__(self, queue=None):
+                super().__init__(queue)
+                self._on_check = asyncio.Queue(maxsize=self._max_conn)
+        
         BrokerClient = Broker(Proxies)
         Tasks = asyncio.gather(
             BrokerClient.find(types=[ProxyType], limit=100),
