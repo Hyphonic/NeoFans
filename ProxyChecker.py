@@ -1,7 +1,6 @@
 from rich.console import Console
 from proxybroker import Broker
 import asyncio
-import os
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -59,8 +58,8 @@ async def Show(Proxies):
             #    File.write(f'proxies/{Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
-            Logger.Error(f'Error processing proxy: {e}')
             Console.print_exception()
+            Logger.Error(f'Error processing proxy: {e}')
 
 Proxies = asyncio.Queue()
 Broker = Broker(Proxies)
