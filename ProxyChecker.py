@@ -54,8 +54,8 @@ async def Show(Proxies):
             
             Logger.Info(f'Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
             
+            os.makedirs('proxies', exist_ok=True)
             with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
-                os.makedirs('proxies', exist_ok=True)
                 File.write(f'{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
@@ -63,7 +63,10 @@ async def Show(Proxies):
             Logger.Error(f'Error processing proxy: {e}')
 
 Proxies = asyncio.Queue()
-Broker = Broker(Proxies)
+Broker = Broker(
+    Proxies,
+    providers=[]
+    )
 Tasks = asyncio.gather(
     Broker.find(types=['HTTP', 'HTTPS', 'SOCKS5'], limit=100),
     Show(Proxies)
