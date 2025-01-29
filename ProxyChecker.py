@@ -58,7 +58,7 @@ async def Show(Proxies):
             #    File.write(f'proxies/{Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
-            Console.print_exception()
+            Console().print_exception()
             Logger.Error(f'Error processing proxy: {e}')
 
 Proxies = asyncio.Queue()
