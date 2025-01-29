@@ -51,7 +51,7 @@ async def Show(Proxies):
             if Proxy is None:
                 break
             
-            Logger.Info(f'Found Proxy: {str(iter(Proxy.types)).lower()}://{Proxy.host}:{Proxy.port}')
+            Logger.Info(f'Found Proxy: {Proxy.types}://{Proxy.host}:{Proxy.port}')
             
             #with open(f'{Proxy.types[0].lower()}.txt', 'a') as File:
             #    os.makedirs('proxies', exist_ok=True)
