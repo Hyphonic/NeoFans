@@ -47,10 +47,6 @@ jobs:
       #     rclone_config: ${{ secrets.PIXELDRAIN_CONF }}
       #     disable_base64: true
 
-      - name: 🔑 Generate Proxies
-        run: |
-          python ProxyChecker.py
-
       - name: ⏬ Download All Content
         env:
           COLUMNS: 120

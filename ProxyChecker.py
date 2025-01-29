@@ -53,20 +53,23 @@ class RichLogger:
 Logger = RichLogger()
 
 async def Show(Proxies, ProgressBar, Task):
+    Count = 0
     while True:
         try:
             Proxy = await Proxies.get()
             if Proxy is None:
                 break
-                
+            
+            Count += 1
+            ProgressBar.update(Task, 
+                description=f'[blue]Found {Count} Proxies[/blue]',
+                completed=Count)
+            
             Logger.Info(f'Found Proxy: {Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}')
             os.makedirs('proxies', exist_ok=True)
             
             async with aiofiles.open(f'proxies/{Proxy.types.pop().lower()}.txt', 'a') as File:
                 await File.write(f'{Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}\n')
-            
-            ProgressBar.update(Task, advance=1)
-            ProgressBar.refresh()
             
         except Exception as e:
             Logger.Error(f'Error processing proxy: {e}')
@@ -76,6 +79,9 @@ async def Main():
     BrokerClient = Broker(Proxies)
     ProxyLimit = 1000
 
+    Logger.Info(f'Scraping {ProxyLimit} Proxies')
+
+    # Progress bar with auto-refresh enabled
     with Progress(
         '[progress.description]{task.description}',
         BarColumn(bar_width=None),
@@ -83,11 +89,11 @@ async def Main():
         '•',
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
-        auto_refresh=False
+        auto_refresh=True  # Enable auto refresh
     ) as ProgressBar:
         Task = ProgressBar.add_task(
             '[blue]Finding Proxies[/blue]',
-            total=ProxyLimit,
+            total=ProxyLimit
         )
         
         Tasks = asyncio.gather(
