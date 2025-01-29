@@ -54,9 +54,9 @@ async def Show(Proxies):
             
             Logger.Info(f'Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
             
-            with open(f'{list(Proxy.types)[0].lower()}.txt', 'a') as File:
+            with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
                 os.makedirs('proxies', exist_ok=True)
-                File.write(f'proxies/{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}\n')
+                File.write(f'{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
             Console().print_exception()
