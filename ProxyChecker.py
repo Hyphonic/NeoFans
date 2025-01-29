@@ -70,8 +70,8 @@ class ProxyChecker:
         }
         self.TotalChecked = 0
         self.TotalWorking = 0
-        # Add regex pattern for extracting IP:PORT
         self.ProxyPattern = re.compile(r'(?:https?://)?(?:http://)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)')
+        self.Lock = asyncio.Lock()  # Add lock for thread-safe updates
 
     async def FetchProxies(self, urls: List[str]) -> List[str]:
         AllProxies = []
@@ -86,7 +86,7 @@ class ProxyChecker:
                     Logger.error(f"Failed to fetch proxies from {Url}: {e}")
         return list(set(AllProxies))
 
-    async def CheckProxy(self, Proxy: str, ProxyType: str, ProgressBar, Task):
+    async def CheckProxy(self, Proxy: str, ProxyType: str, ProgressBar, Task, TotalProxies: int):
         TestSite = TEST_SITES[int(time.time()) % len(TEST_SITES)]
         
         # Extract clean IP:PORT from proxy string
@@ -105,44 +105,37 @@ class ProxyChecker:
                     Response = await Client.get(TestSite)
                     Latency = int((time.time() - StartTime) * 1000)  # Convert to ms
                     
-                    self.TotalChecked += 1
-                    if Response.status_code == 200:
-                        self.WorkingProxies[ProxyType].append(FormattedProxy)
-                        self.TotalWorking += 1
-                        
+                    async with self.Lock:  # Use lock for thread-safe updates
+                        self.TotalChecked += 1
+                        if Response.status_code == 200:
+                            self.WorkingProxies[ProxyType].append(FormattedProxy)
+                            self.TotalWorking += 1
+                            
                         ProgressBar.update(
                             Task,
                             description=f"[blue]{ProxyType.upper()}[/blue]",
                             advance=1,
                             proxy=FormattedProxy,
-                            stats=f"{self.TotalWorking}/{self.TotalChecked}",
+                            stats=f"{self.TotalWorking}/{TotalProxies}",  # Use fixed total
                             latency=f"{Latency}ms",
-                            status="[green]Working[/green]"
+                            status="[green]Working[/green]" if Response.status_code == 200 
+                                else f"[red]Bad Status: {Response.status_code}[/red]"
                         )
-                    else:
-                        ProgressBar.update(
-                            Task,
-                            description=f"[blue]{ProxyType.upper()}[/blue]",
-                            advance=1,
-                            proxy=FormattedProxy,
-                            stats=f"{self.TotalWorking}/{self.TotalChecked}",
-                            latency=f"{Latency}ms",
-                            status=f"[red]Bad Status: {Response.status_code}[/red]"
-                        )
-                    ProgressBar.refresh()
                         
             except Exception as e:
-                self.TotalChecked += 1
-                ProgressBar.update(
-                    Task,
-                    description=f"[blue]{ProxyType.upper()}[/blue]",
-                    advance=1,
-                    proxy=FormattedProxy,
-                    stats=f"{self.TotalWorking}/{self.TotalChecked}",
-                    latency="N/A",
-                    status="[red]Failed[/red]"
-                )
-                ProgressBar.refresh()
+                async with self.Lock:
+                    self.TotalChecked += 1
+                    ProgressBar.update(
+                        Task,
+                        description=f"[blue]{ProxyType.upper()}[/blue]",
+                        advance=1,
+                        proxy=FormattedProxy,
+                        stats=f"{self.TotalWorking}/{TotalProxies}",  # Use fixed total
+                        latency="N/A",
+                        status="[red]Failed[/red]"
+                    )
+            
+            ProgressBar.refresh()
 
     async def SaveProxies(self):
         os.makedirs('proxies', exist_ok=True)
@@ -158,7 +151,7 @@ async def Main():
     
     with Progress(
         "[progress.description]{task.description}",
-        BarColumn(bar_width=None),
+        BarColumn(bar_width=100),  # Set fixed width to 50 characters
         "[progress.percentage]{task.percentage:>3.0f}%",
         "•",
         "{task.fields[proxy]}",
@@ -176,13 +169,14 @@ async def Main():
         for ProxyType, Urls in ProxyUrls.items():
             Logger.info(f"Fetching {ProxyType} proxies...")
             RawProxies = await Checker.FetchProxies(Urls)
-            Logger.info(f"Found {len(RawProxies)} {ProxyType} proxies to check")
+            TotalProxies = len(RawProxies)  # Get total once
+            Logger.info(f"Found {TotalProxies} {ProxyType} proxies to check")
             
             Task = ProgressBar.add_task(
                 "",
-                total=len(RawProxies),
+                total=TotalProxies,
                 proxy="",
-                stats="0/0",
+                stats=f"0/{TotalProxies}",  # Initialize with correct total
                 latency="0ms",
                 status=""
             )
@@ -191,7 +185,13 @@ async def Main():
             for Proxy in RawProxies:
                 if ProxyType == 'http' and 'https://' in Proxy:
                     Proxy = Proxy.replace('https://', 'http://')
-                Tasks.append(Checker.CheckProxy(Proxy, ProxyType, ProgressBar, Task))
+                Tasks.append(Checker.CheckProxy(
+                    Proxy, 
+                    ProxyType, 
+                    ProgressBar, 
+                    Task,
+                    TotalProxies  # Pass fixed total to CheckProxy
+                ))
             
             Logger.info(f"Checking {ProxyType} proxies...")
             await asyncio.gather(*Tasks)
