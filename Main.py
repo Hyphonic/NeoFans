@@ -413,18 +413,14 @@ class Fetcher:
                                         break
                                         
                                     FileUrl = f'https://{Hoster}.su{Attachment.get('path')}'
-                                    Logger.Debug(f'∙ Attachment URL: {FileUrl}')
                                     FileHash = self.ExtractHash(FileUrl)
-                                    Logger.Debug(f'∙ Extracted hash: {FileHash}')
                                     
                                     if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
                                         #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                         continue
 
                                     if FileHash:
-                                        Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯')
                                         FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
-                                        Logger.Debug(f'\n\n∙ Added file: {FileData}\n\n')
                                         self.Result[self.Platform][self.Id].append(FileData)
                                         self.GlobalLimit -= 1
                                         self.CreatorLimit -= 1
@@ -741,6 +737,7 @@ async def Main():
 
                 if Success:
                     # Store successful download
+                    Logger.Debug(f'∙ Downloaded {FileData[0]}, appending to {Platform}/{Creator}')
                     SuccessfulDownloads[Platform][Creator].append(FileData[0])
                 
                 CompletedFiles += 1
