@@ -188,7 +188,11 @@ class HashManager:
     async def SaveHashes(self, NewHashes: Dict[str, Dict[str, list[str]]]):
         '''Save new hashes to the cache file while preserving existing ones.'''
         try:
-            Logger.Debug(f'Saving new hashes for platforms: {list(NewHashes.keys())}')
+            Logger.Debug('Saving new hashes for platforms:')
+            for Platform, CreatorData in NewHashes.items():
+                Logger.Debug(f'∙ {Platform}: {len(CreatorData)} creators')
+                for Creator, Hashes in CreatorData.items():
+                    Logger.Debug(f'∙ {Creator}: {len(Hashes)} hashes')
             
             for Platform, CreatorData in NewHashes.items():
                 if Platform not in self.CachedHashes:
