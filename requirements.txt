@@ -4,3 +4,4 @@ aiofiles
 python-dotenv
 backoff
 httpx[socks]
+proxybroker
