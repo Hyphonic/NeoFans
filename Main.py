@@ -735,6 +735,8 @@ async def Main():
                 FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
+                Logger.Debug(f'∙ {Success} | {FileData[0]} | {FileData[1]} | {FileData[2]}')
+
                 if Success:
                     # Store successful download
                     Logger.Debug(f'∙ Downloaded {FileData[0]}, appending to {Platform}/{Creator}')
