@@ -2,7 +2,6 @@ from rich.console import Console
 from proxybroker import Broker
 import aiofiles
 import asyncio
-import os
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
