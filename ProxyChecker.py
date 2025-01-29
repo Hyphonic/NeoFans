@@ -58,12 +58,14 @@ async def Show(Proxies, ProgressBar, Task):
         try:
             Proxy = await Proxies.get()
             if Proxy is None:
+                Logger.Info('Proxy Queue is Empty')
                 break
             
             Count += 1
             ProgressBar.update(Task, 
                 description=f'[blue]Found {Count} Proxies[/blue]',
                 completed=Count)
+            ProgressBar.refresh()
             
             Logger.Info(f'Found Proxy: {Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}')
             os.makedirs('proxies', exist_ok=True)
@@ -77,11 +79,10 @@ async def Show(Proxies, ProgressBar, Task):
 async def Main():
     Proxies = asyncio.Queue()
     BrokerClient = Broker(Proxies)
-    ProxyLimit = 1000
+    ProxyLimit = 100
 
     Logger.Info(f'Scraping {ProxyLimit} Proxies')
 
-    # Progress bar with auto-refresh enabled
     with Progress(
         '[progress.description]{task.description}',
         BarColumn(bar_width=None),
@@ -89,7 +90,7 @@ async def Main():
         '•',
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
-        auto_refresh=True  # Enable auto refresh
+        auto_refresh=False
     ) as ProgressBar:
         Task = ProgressBar.add_task(
             '[blue]Finding Proxies[/blue]',
