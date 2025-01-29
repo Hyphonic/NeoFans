@@ -187,15 +187,25 @@ class HashManager:
 
     async def SaveHashes(self, NewHashes: Dict[str, Dict[str, list[str]]]):
         '''Save new hashes to the cache file while preserving existing ones.'''
-        for Platform in NewHashes:
-            for Creator in Platform:
+        try:
+            Logger.Debug(f'Saving new hashes for platforms: {list(NewHashes.keys())}')
+            
+            for Platform, CreatorData in NewHashes.items():
                 if Platform not in self.CachedHashes:
                     self.CachedHashes[Platform] = {}
-                if Creator not in self.CachedHashes[Platform]:
-                    self.CachedHashes[Platform][Creator] = []
-                self.CachedHashes[Platform][Creator].extend(NewHashes[Platform][Creator])
-        
-        await aiofiles.open(self.CacheFile, 'w').write(json.dumps(self.CachedHashes, indent=4))
+                    
+                for Creator, Hashes in CreatorData.items():
+                    if Creator not in self.CachedHashes[Platform]:
+                        self.CachedHashes[Platform][Creator] = []
+                    self.CachedHashes[Platform][Creator].extend(Hashes)
+                    Logger.Debug(f'Added {len(Hashes)} hashes for {Platform}/{Creator}')
+            
+            async with aiofiles.open(self.CacheFile, 'w') as f:
+                await f.write(json.dumps(self.CachedHashes, indent=4))
+            
+        except Exception as e:
+            Logger.Error(f'Failed to save hashes: {str(e)}')
+            Console(force_terminal=True).print_exception(max_frames=1)
     
     async def HasHash(self, Platform: str, Creator: str, Hash: str) -> bool:
         '''Check if a hash is already cached.'''
