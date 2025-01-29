@@ -52,14 +52,15 @@ async def Show(Proxies):
             if Proxy is None:
                 break
             
-            Logger.Info(f'Found {Proxy.types[1] if Proxy.types[0] == 'HTTP' else None} Proxy: {Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}')
+            Logger.Info(f'Found Proxy: {Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}')
             
-            with open(f'{Proxy.types[0].lower()}.txt', 'a') as File:
-                os.makedirs('proxies', exist_ok=True)
-                File.write(f'proxies/{Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}\n')
+            #with open(f'{Proxy.types[0].lower()}.txt', 'a') as File:
+            #    os.makedirs('proxies', exist_ok=True)
+            #    File.write(f'proxies/{Proxy.types[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
             Logger.Error(f'Error processing proxy: {e}')
+            Console.print_exception()
 
 Proxies = asyncio.Queue()
 Broker = Broker(Proxies)
