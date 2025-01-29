@@ -243,6 +243,7 @@ class Fetcher:
 
     async def Scrape(self):
         if self.Platform == 'rule34':
+            Logger.Debug(f'∙ Scraping Rule34 for {self.Name}')
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['pid'] = self.Page
@@ -253,6 +254,7 @@ class Fetcher:
                 try:
                     _ = 0
                     if Response:
+                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         Data = Response
                         if not Data or (isinstance(Data, list) and len(Data) == 0):
                             break
@@ -301,6 +303,7 @@ class Fetcher:
         ############################################################
 
         elif self.Platform == 'e621':
+            Logger.Debug(f'∙ Scraping e621 for {self.Name}')
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['page'] = self.Page + 1
@@ -310,6 +313,7 @@ class Fetcher:
                 
                 try:
                     if Response and 'posts' in Response:
+                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         Posts = Response['posts']
                         if not Posts or len(Posts) == 0:
                             break
@@ -359,12 +363,14 @@ class Fetcher:
 
         else:
             Hoster = 'coomer' if self.Platform in ['onlyfans', 'fansly'] else 'kemono'
+            Logger.Debug(f'∙ Scraping {Config['platform_names'][self.Platform]} for {self.Name}')
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 self.LastPage = self.Page  # These platforms use offset-based pagination
                 Response, StatusCode = await self.FetchUrl(f'https://{Hoster}.su/api/v1/{self.Platform}/user/{self.Id}?o={self.Page}')
                 
                 try:
                     if Response and isinstance(Response, list):  # Change here - response is a list     
+                        Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         _ = 0
                         for Post in Response:
                             if self.GlobalLimit > 0 and self.CreatorLimit > 0:
