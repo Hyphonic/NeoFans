@@ -3,6 +3,7 @@ from rich.console import Console
 import httpx
 import time
 import os
+import re
 import asyncio
 from rich.progress import Progress, BarColumn, TimeElapsedColumn
 
@@ -69,6 +70,8 @@ class ProxyChecker:
         }
         self.TotalChecked = 0
         self.TotalWorking = 0
+        # Add regex pattern for extracting IP:PORT
+        self.ProxyPattern = re.compile(r'(?:https?://)?(?:http://)?(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)')
 
     async def FetchProxies(self, urls: List[str]) -> List[str]:
         AllProxies = []
@@ -85,7 +88,11 @@ class ProxyChecker:
 
     async def CheckProxy(self, Proxy: str, ProxyType: str, ProgressBar, Task):
         TestSite = TEST_SITES[int(time.time()) % len(TEST_SITES)]
-        FormattedProxy = f"{ProxyType}://{Proxy}"
+        
+        # Extract clean IP:PORT from proxy string
+        Match = self.ProxyPattern.search(Proxy)
+        CleanProxy = Match.group(1) if Match else Proxy
+        FormattedProxy = f"{ProxyType}://{CleanProxy}"
         
         async with self.Semaphore:
             try:
@@ -163,7 +170,8 @@ async def Main():
         "{task.fields[status]}",
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
-        auto_refresh=False
+        auto_refresh=False,
+        expand=True
     ) as ProgressBar:
         for ProxyType, Urls in ProxyUrls.items():
             Logger.info(f"Fetching {ProxyType} proxies...")
@@ -204,7 +212,6 @@ if __name__ == "__main__":
             "https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt"
         ]
     }
-    Console(force_terminal=True).print(Screen)
     import aiofiles
     try:
         asyncio.run(Main())
