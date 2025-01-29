@@ -2,6 +2,9 @@
 
 A modern and efficient content fetcher, revamped from the now deprecated OmniFans. NeoFans helps you download and organize content from various creator platforms.
 
+> [!WARNING]
+> Current Status: `Not Working`
+
 ## ✨ Features
 
 ### 🎯 Supported Platforms
