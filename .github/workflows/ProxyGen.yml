@@ -1,0 +1,38 @@
+name: Proxy Gen
+
+on:
+    workflow_dispatch:
+
+jobs:
+    proxy-gen:
+        name: 🌐 Generate Proxies
+        runs-on: ubuntu-latest
+        steps:
+            - name: 🗑️ Cleanup Workflow Runs
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  REPO: ${{ github.repository }}
+              run: |
+                  # Find and delete failed workflow runs
+                  gh run list --limit 100 --repo "$REPO" --json databaseId,conclusion | jq -c '.[] | select(.conclusion == "failure" or .conclusion == "cancelled") | .databaseId' | while read -r run_id; do
+                      echo "Deleting failed workflow with ID $run_id"
+                      gh run delete "$run_id" --repo "$REPO"
+                  done
+
+            - name: 📥 Checkout Code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: 📦 Set Up Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: '3.13'
+                  cache: 'pip'
+
+            - name: 📦 Install Dependencies
+              run: pip install -r requirements.txt
+
+            - name: 🔑 Generate Proxies
+              run: |
+                  python ProxyChecker.py

@@ -59,11 +59,11 @@ async def Show(Proxies, ProgressBar, Task):
             if Proxy is None:
                 break
                 
-            Logger.Info(f'Found Proxy: socks5://{Proxy.host}:{Proxy.port}')
+            Logger.Info(f'Found Proxy: {Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}')
             os.makedirs('proxies', exist_ok=True)
             
-            async with aiofiles.open('proxies/socks5.txt', 'a') as File:
-                await File.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
+            async with aiofiles.open(f'proxies/{Proxy.types.pop().lower()}.txt', 'a') as File:
+                await File.write(f'{Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}\n')
             
             ProgressBar.update(Task, advance=1)
             ProgressBar.refresh()
