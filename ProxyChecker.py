@@ -1,5 +1,5 @@
 from rich.console import Console
-from proxybroker import Broker
+from proxybroker.api import Broker as BaseBroker
 import aiofiles
 import asyncio
 import os
@@ -52,57 +52,52 @@ class RichLogger:
 
 Logger = RichLogger()
 
-async def Show(Proxies, ProgressBar, Task):
-    Count = 0
+class ModernBroker(BaseBroker):
+    def __init__(self, queue=None):
+        super().__init__(queue)
+        self._on_check = asyncio.Queue(maxsize=self._max_conn)
+
+async def Show(Proxies, Progress, Task):
+    count = 0
     while True:
         try:
             Proxy = await Proxies.get()
             if Proxy is None:
-                Logger.Info('Proxy Queue is Empty')
                 break
             
-            Count += 1
-            ProgressBar.update(Task, 
-                description=f'[blue]Found {Count} Proxies[/blue]',
-                completed=Count)
-            ProgressBar.refresh()
+            count += 1
+            Progress.update(Task, advance=1)
             
-            Logger.Info(f'Found Proxy: {Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}')
             os.makedirs('proxies', exist_ok=True)
-            
-            async with aiofiles.open(f'proxies/{Proxy.types.pop().lower()}.txt', 'a') as File:
-                await File.write(f'{Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}\n')
+            async with aiofiles.open(f'proxies/socks5.txt', 'a') as f:
+                await f.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
             Logger.Error(f'Error processing proxy: {e}')
 
 async def Main():
+    Logger.Info('Starting Proxy Checker')
     Proxies = asyncio.Queue()
-    BrokerClient = Broker(Proxies)
+    BrokerClient = ModernBroker(Proxies)
     ProxyLimit = 100
-
-    Logger.Info(f'Scraping {ProxyLimit} Proxies')
 
     with Progress(
         '[progress.description]{task.description}',
-        BarColumn(bar_width=None),
+        BarColumn(),
         '[progress.percentage]{task.percentage:>3.0f}%',
-        '•',
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
-        auto_refresh=False
-    ) as ProgressBar:
-        Task = ProgressBar.add_task(
+        auto_refresh=True
+    ) as Progress:
+        Task = Progress.add_task(
             '[blue]Finding Proxies[/blue]',
             total=ProxyLimit
         )
         
-        Tasks = asyncio.gather(
+        await asyncio.gather(
             BrokerClient.find(types=['SOCKS5'], limit=ProxyLimit),
-            Logger.Debug('Starting Proxy Checker'),
-            Show(Proxies, ProgressBar, Task)
+            Show(Proxies, Progress, Task)
         )
-        await Tasks
 
 if __name__ == '__main__':
     asyncio.run(Main())
