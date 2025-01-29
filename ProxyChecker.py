@@ -2,6 +2,13 @@ from rich.console import Console
 from proxybroker import Broker
 import aiofiles
 import asyncio
+import os
+
+from rich.progress import Progress
+from rich.progress import (
+    BarColumn,
+    TimeElapsedColumn
+)
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -45,20 +52,49 @@ class RichLogger:
 
 Logger = RichLogger()
 
-async def Show(Proxies):
+async def Show(Proxies, ProgressBar, Task):
     while True:
-        Proxy = await Proxies.get()
-        if Proxy is None: 
-            break
-        Logger.Info(f'Found Proxy: socks5://{Proxy.host}:{Proxy.port}')
-        async with aiofiles.open('proxies/socks5.txt', 'a') as File:
-            await File.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
+        try:
+            Proxy = await Proxies.get()
+            if Proxy is None:
+                break
+                
+            Logger.Info(f'Found Proxy: socks5://{Proxy.host}:{Proxy.port}')
+            os.makedirs('proxies', exist_ok=True)
+            
+            async with aiofiles.open('proxies/socks5.txt', 'a') as File:
+                await File.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
+            
+            ProgressBar.update(Task, advance=1)
+            ProgressBar.refresh()
+            
+        except Exception as e:
+            Logger.Error(f'Error processing proxy: {e}')
 
-Proxies = asyncio.Queue()
-BrokerClient = Broker(Proxies)
-Tasks = asyncio.gather(
-    BrokerClient.find(types=['SOCKS5'], limit=100),
-    Show(Proxies))
-    
-Loop = asyncio.get_event_loop()
-Loop.run_until_complete(Tasks)
+async def Main():
+    Proxies = asyncio.Queue()
+    BrokerClient = Broker(Proxies)
+    ProxyLimit = 1000
+
+    with Progress(
+        '[progress.description]{task.description}',
+        BarColumn(bar_width=None),
+        '[progress.percentage]{task.percentage:>3.0f}%',
+        '•',
+        TimeElapsedColumn(),
+        console=Console(force_terminal=True),
+        auto_refresh=False
+    ) as ProgressBar:
+        Task = ProgressBar.add_task(
+            '[blue]Finding Proxies[/blue]',
+            total=ProxyLimit,
+        )
+        
+        Tasks = asyncio.gather(
+            BrokerClient.find(types=['SOCKS5', 'HTTP', 'HTTPS'], limit=ProxyLimit),
+            Show(Proxies, ProgressBar, Task)
+        )
+        await Tasks
+
+if __name__ == '__main__':
+    asyncio.run(Main())
