@@ -98,7 +98,8 @@ async def Main():
         )
         
         Tasks = asyncio.gather(
-            BrokerClient.find(types=['SOCKS5', 'HTTP', 'HTTPS'], limit=ProxyLimit),
+            BrokerClient.find(types=['SOCKS5'], limit=ProxyLimit),
+            Logger.Debug('Starting Proxy Checker'),
             Show(Proxies, ProgressBar, Task)
         )
         await Tasks
