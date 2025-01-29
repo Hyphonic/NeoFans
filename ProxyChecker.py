@@ -52,10 +52,10 @@ async def Show(Proxies):
             if Proxy is None:
                 break
             
-            Logger.Info(f'Found Proxy: {Proxy.types}://{Proxy.host}:{Proxy.port}')
+            Logger.Info(f'Found {Proxy.types[1] if Proxy.types[0] == 'HTTP' else None} Proxy: {Proxy.types[0]}://{Proxy.host}:{Proxy.port}')
             
-            with open(f'{Proxy.types}.txt', 'a') as File:
-                File.write(f'{Proxy.types}://{Proxy.host}:{Proxy.port}\n')
+            with open(f'{Proxy.types[0]}.txt', 'a') as File:
+                File.write(f'{Proxy.types[0]}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
             Logger.Error(f'Error processing proxy: {e}')
