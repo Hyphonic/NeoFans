@@ -180,6 +180,10 @@ class HashManager:
                 if Creator not in self.CachedHashes[Platform]:
                     self.CachedHashes[Platform][Creator] = []
                 self.CachedHashes[Platform][Creator].extend(NewHashes[Platform][Creator])
+    
+    async def HasHash(self, Platform: str, Creator: str, Hash: str) -> bool:
+        '''Check if a hash is already cached.'''
+        return Hash in self.CachedHashes.get(Platform, {}).get(Creator, [])
 
 class Fetcher:
     def __init__(self, Platform, Id, Name, DirectoryName, HashManager, CreatorLimit, GlobalLimit):
@@ -242,8 +246,9 @@ class Fetcher:
             return None, None
 
     async def Scrape(self):
+        Logger.Debug(f'\n∙ Scraping {self.Platform} for {self.Name}')
+        Logger.Debug(f'∙ Creator Limit: {self.CreatorLimit} | Global Limit: {self.GlobalLimit}\n')
         if self.Platform == 'rule34':
-            Logger.Debug(f'∙ Scraping Rule34 for {self.Name}')
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['pid'] = self.Page
@@ -304,7 +309,6 @@ class Fetcher:
         ############################################################
 
         elif self.Platform == 'e621':
-            Logger.Debug(f'∙ Scraping e621 for {self.Name}')
             BaseParams = dict(urllib.parse.parse_qsl(self.Params))
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 BaseParams['page'] = self.Page + 1
@@ -364,7 +368,6 @@ class Fetcher:
 
         else:
             Hoster = 'coomer' if self.Platform in ['onlyfans', 'fansly'] else 'kemono'
-            Logger.Debug(f'∙ Scraping {Config['platform_names'][self.Platform]} for {self.Name}')
             while self.GlobalLimit > 0 and self.CreatorLimit > 0:
                 self.LastPage = self.Page  # These platforms use offset-based pagination
                 Response, StatusCode = await self.FetchUrl(f'https://{Hoster}.su/api/v1/{self.Platform}/user/{self.Id}?o={self.Page}')
