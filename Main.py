@@ -115,9 +115,8 @@ class AsyncDownloader:
         self.Platform = Platform
         self.Creator = Creator
         try:
-                ProxyType = random.choice(['http', 'socks5'])
-                Proxy = random.choice(open(f'proxies/{ProxyType}.txt').read().splitlines())
-        except Exception:
+                Proxy = random.choice(open('proxies/socks5.txt').read().splitlines())
+        except FileNotFoundError:
             pass
         self.Client = httpx.AsyncClient(proxy=Proxy, timeout=30.0)
 

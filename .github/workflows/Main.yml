@@ -51,6 +51,10 @@ jobs:
         run: |
           python ProxyChecker.py
 
+      - name: 📃 List Proxies
+        run: |
+          cat proxies/socks5.txt
+
       - name: ⏬ Download All Content
         env:
           COLUMNS: 120

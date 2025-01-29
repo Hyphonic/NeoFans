@@ -51,7 +51,7 @@ async def Show(Proxies):
         if Proxy is None: 
             break
         Logger.Info(f'Found Proxy: {Proxy}')
-        async with aiofiles.open('proxies.txt', 'w') as File:
+        async with aiofiles.open('proxies/socks5.txt', 'a') as File:
             await File.write(f'{Proxy}\n')
 
 
