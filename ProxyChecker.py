@@ -1,14 +1,7 @@
 from rich.console import Console
 from proxybroker import Broker
-import aiofiles
 import asyncio
 import os
-
-from rich.progress import Progress
-from rich.progress import (
-    BarColumn,
-    TimeElapsedColumn
-)
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -53,36 +46,26 @@ class RichLogger:
 Logger = RichLogger()
 
 async def Show(Proxies):
-    Count = 0
     while True:
         try:
             Proxy = await Proxies.get()
             if Proxy is None:
-                Logger.Info('Proxy Queue is Empty')
                 break
             
-            Count += 1
             Logger.Info(f'Found Proxy: {Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}')
-            os.makedirs('proxies', exist_ok=True)
             
-            async with aiofiles.open(f'proxies/{Proxy.types.pop().lower()}.txt', 'a') as File:
-                await File.write(f'{Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}\n')
+            with open(f'{Proxy.types.pop().lower()}.txt', 'a') as File:
+                File.write(f'{Proxy.types.pop().lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
             Logger.Error(f'Error processing proxy: {e}')
 
-async def Main():
-    Proxies = asyncio.Queue()
-    BrokerClient = Broker(Proxies)
-    ProxyLimit = 100
+Proxies = asyncio.Queue()
+Broker = Broker(Proxies)
+Tasks = asyncio.gather(
+    Broker.find(types=['HTTP', 'HTTPS'], limit=100),
+    Show(Proxies)
+)
 
-    Logger.Info(f'Scraping {ProxyLimit} Proxies')
-    
-    Tasks = asyncio.gather(
-        BrokerClient.find(types=['SOCKS5'], limit=ProxyLimit),
-        Show(Proxies)
-    )
-    await Tasks
-
-if __name__ == '__main__':
-    asyncio.run(Main())
+Loop = asyncio.get_event_loop()
+Loop.run_until_complete(Tasks)
