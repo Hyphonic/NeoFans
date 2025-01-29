@@ -1,7 +1,7 @@
 from rich.console import Console
+from proxybroker import Broker
 import aiofiles
 import asyncio
-import os
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -45,42 +45,21 @@ class RichLogger:
 
 Logger = RichLogger()
 
-async def Show(Proxies, ProxyType):
-    try:
-        os.makedirs('proxies', exist_ok=True)
-        async with aiofiles.open(f'proxies/{ProxyType.lower()}.txt', 'w') as File:
-            while True:
-                try:
-                    Proxy = await asyncio.wait_for(Proxies.get(), timeout=10.0)
-                    if Proxy is None:
-                        break
-                    await File.write(f'{Proxy.host}:{Proxy.port}\n')
-                    Logger.Info(f'Found {ProxyType} Proxy: {Proxy.host}:{Proxy.port}')
-                except asyncio.TimeoutError:
-                    Logger.Warning(f'Timeout waiting for {ProxyType} proxy')
-                    break
-                except Exception as e:
-                    Logger.Error(f'Error processing {ProxyType} proxy: {str(e)}')
-                    continue
-    except Exception as e:
-        Logger.Error(f'Failed to save {ProxyType} proxies: {str(e)}')
+async def Show(Proxies):
+    while True:
+        Proxy = await Proxies.get()
+        if Proxy is None: 
+            break
+        Logger.Info(f'Found Proxy: {Proxy}')
+        async with aiofiles.open('proxies.txt', 'w') as File:
+            await File.write(f'{Proxy}\n')
 
-async def Main():
-    for ProxyType in ['SOCKS5']:
-        Proxies = asyncio.Queue()
-        # Create Broker without loop parameter
-        from proxybroker.api import Broker as BaseBroker
-        class Broker(BaseBroker):
-            def __init__(self, queue=None):
-                super().__init__(queue)
-                self._on_check = asyncio.Queue(maxsize=self._max_conn)
-        
-        BrokerClient = Broker(Proxies)
-        Tasks = asyncio.gather(
-            BrokerClient.find(types=[ProxyType], limit=100),
-            Show(Proxies, ProxyType)
-        )
-        await Tasks
 
-if __name__ == '__main__':
-    asyncio.run(Main())
+Proxies = asyncio.Queue()
+BrokerClient = Broker(Proxies)
+Tasks = asyncio.gather(
+    BrokerClient.find(types=['SOCKS5'], limit=100),
+    Show(Proxies))
+    
+Loop = asyncio.get_event_loop()
+Loop.run_until_complete(Tasks)
