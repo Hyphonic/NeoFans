@@ -118,7 +118,7 @@ class AsyncDownloader:
         #         Proxy = random.choice(open('proxies/socks5.txt').read().splitlines())
         # except FileNotFoundError:
         #     pass
-        self.Client = httpx.AsyncClient(proxy=Proxy, timeout=30.0, verify=False)
+        self.Client = httpx.AsyncClient(timeout=30.0, verify=False)
 
         self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
         self.PartialPath = f'{self.FullPath}.partial'
