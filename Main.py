@@ -642,6 +642,8 @@ async def Main():
                     AllFiles.extend([(FileData, Platform, Creator) 
                                     for FileData in Result[Platform][Creator]])
     
+    Logger.Info(f'∙ Found {len(AllFiles)} new files to download')
+    
     # Create directories
     Directories = [os.path.dirname(File[0][2]) for File in AllFiles]
     await CreateDirectories(list(set(Directories)))
@@ -668,12 +670,16 @@ async def Main():
             size="0B"
         )
         CompletedFiles = 0
+        PlatformsHandled = []
         Semaphore = asyncio.Semaphore(Config['threads']['max_workers'])
 
         async def Worker(File):
             nonlocal CompletedFiles
             async with Semaphore:
                 FileData, Platform, Creator = File
+                if Platform not in PlatformsHandled:
+                    PlatformsHandled.append(Platform)
+                    Logger.Info(f'∙ Downloading files from {Config['platform_names'][Platform]}')
                 Downloader = AsyncDownloader(FileData, Platform, Creator)
                 FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
