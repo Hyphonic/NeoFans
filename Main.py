@@ -257,6 +257,7 @@ class Fetcher:
                         Logger.Debug(f'∙ Got {len(Response)} posts for {self.Platform}/{self.Name}')
                         Data = Response
                         if not Data or (isinstance(Data, list) and len(Data) == 0):
+                            Logger.Error(f'No data at page {self.Page+1}')
                             break
                         
                         for Post in Data:
@@ -265,11 +266,11 @@ class Fetcher:
                                 FileHash = self.ExtractHash(FileUrl)
 
                                 if FileHash and await self.HashManager.HasHash(self.Platform, self.Id, FileHash):
-                                    #Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
+                                    Logger.Debug(f'∙ Skipping {FileHash} as it is already cached')
                                     continue
 
                                 if FileHash:
-                                    #Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
+                                    Logger.Debug(f'∙ Found New File {FileHash[:40]}⋯ At Page {self.Page+1}')
                                     FileData = [FileHash, FileUrl, f'{self.DirectoryName}/{FileHash}{os.path.splitext(FileUrl)[1]}']
                                     self.Result[self.Platform][self.Id].append(FileData)
                                     self.GlobalLimit -= 1
@@ -278,7 +279,7 @@ class Fetcher:
                                     _ += 1
                         
                         if _ < self.ParamsLimit:
-                            #Logger.Info(f'Page {self.Page+1} → {_} files')
+                            Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
                         Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
