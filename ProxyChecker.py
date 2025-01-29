@@ -50,10 +50,9 @@ async def Show(Proxies):
         Proxy = await Proxies.get()
         if Proxy is None: 
             break
-        Logger.Info(f'Found Proxy: {Proxy}')
+        Logger.Info(f'Found Proxy: {Proxy.host}:{Proxy.port}')
         async with aiofiles.open('proxies/socks5.txt', 'a') as File:
-            await File.write(f'{Proxy}\n')
-
+            await File.write(f'{Proxy.host}:{Proxy.port}\n')
 
 Proxies = asyncio.Queue()
 BrokerClient = Broker(Proxies)
