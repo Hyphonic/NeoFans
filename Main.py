@@ -189,12 +189,11 @@ class HashManager:
         '''Save new hashes to the cache file while preserving existing ones.'''
         try:
             Logger.Debug('Saving new hashes for platforms:')
+            
             for Platform, CreatorData in NewHashes.items():
                 Logger.Debug(f'∙ {Platform}: {len(CreatorData)} creators')
                 for Creator, Hashes in CreatorData.items():
                     Logger.Debug(f'∙ {Creator}: {len(Hashes)} hashes')
-            
-            for Platform, CreatorData in NewHashes.items():
                 if Platform not in self.CachedHashes:
                     self.CachedHashes[Platform] = {}
                     
