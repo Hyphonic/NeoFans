@@ -278,7 +278,7 @@ class Fetcher:
                         if _ < self.ParamsLimit:
                             #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
-                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
                         if StatusCode != 200:
                             #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
@@ -339,7 +339,7 @@ class Fetcher:
                             #Logger.Info(f'Page {self.Page+1} → {_} files')
                             break
 
-                        #Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
+                        Logger.Info(f'Page {self.Page+1} → {self.FilesDownloaded} files')
                     else:
                         #Logger.Error(f'No response or bad status ({StatusCode}) at page {self.Page+1}')
                         break
@@ -413,6 +413,12 @@ class Fetcher:
                     else:
                         #Logger.Error(f'No response or bad status ({StatusCode})')
                         break
+
+                    if _ < self.ParamsLimit:
+                        #Logger.Info(f'Page {self.Page} → {_} files')
+                        break
+
+                    Logger.Info(f'Page {self.Page} → {self.FilesDownloaded} files')
                         
                 except Exception:
                     #Logger.Error(f'Error processing page: {e}')
