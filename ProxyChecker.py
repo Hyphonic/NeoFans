@@ -57,7 +57,7 @@ class ModernBroker(BaseBroker):
         super().__init__(queue)
         self._on_check = asyncio.Queue(maxsize=self._max_conn)
 
-async def Show(Proxies, Progress, Task):
+async def Show(Proxies, ProgressBar, Task):
     count = 0
     while True:
         try:
@@ -66,10 +66,10 @@ async def Show(Proxies, Progress, Task):
                 break
             
             count += 1
-            Progress.update(Task, advance=1)
+            ProgressBar.update(Task, advance=1)
             
             os.makedirs('proxies', exist_ok=True)
-            async with aiofiles.open(f'proxies/socks5.txt', 'a') as f:
+            async with aiofiles.open('proxies/socks5.txt', 'a') as f:
                 await f.write(f'socks5://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
@@ -88,15 +88,15 @@ async def Main():
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
         auto_refresh=True
-    ) as Progress:
-        Task = Progress.add_task(
+    ) as ProgressBar:
+        Task = ProgressBar.add_task(
             '[blue]Finding Proxies[/blue]',
             total=ProxyLimit
         )
         
         await asyncio.gather(
             BrokerClient.find(types=['SOCKS5'], limit=ProxyLimit),
-            Show(Proxies, Progress, Task)
+            Show(Proxies, ProgressBar, Task)
         )
 
 if __name__ == '__main__':
