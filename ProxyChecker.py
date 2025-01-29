@@ -65,7 +65,7 @@ async def Show(Proxies):
 Proxies = asyncio.Queue()
 Broker = Broker(Proxies)
 Tasks = asyncio.gather(
-    Broker.find(types=['HTTP', 'HTTPS', 'SOCKS5'], limit=1000),
+    Broker.find(types=['HTTP', 'HTTPS', 'SOCKS5'], limit=100),
     Show(Proxies)
 )
 
