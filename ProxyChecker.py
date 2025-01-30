@@ -2,6 +2,7 @@ from rich.console import Console
 from proxybroker import Broker
 import asyncio
 import aiohttp
+import random
 import json
 import os
 import re
@@ -191,6 +192,10 @@ async def Main():
         AllProxies.extend(list(set(Proxies)))
     
     Logger.Info(f'Found {len(AllProxies)} Proxies.')
+
+    Logger.Info('Here are 10 random proxies:')
+    for Proxy in random.sample(AllProxies, 10):
+        Logger.Debug(f'∙ {Proxy}')
     
     # Setup queue and broker
     Queue = asyncio.Queue()
