@@ -46,33 +46,6 @@ class RichLogger:
 
 Logger = RichLogger()
 
-async def Verify(Proxy):
-    ExceptionList = [
-        aiohttp.ClientError,
-        asyncio.TimeoutError,
-        aiohttp.ClientConnectionError,
-        aiohttp.ClientResponseError,
-        aiohttp.ClientPayloadError,
-        aiohttp.ServerTimeoutError,
-        aiohttp.ServerDisconnectedError,
-        aiohttp.ServerConnectionError,
-        aiohttp.ServerFingerprintMismatch,
-        aiohttp.ClientConnectorError,
-        aiohttp.ClientProxyConnectionError,
-    ]
-    try:
-        async with aiohttp.ClientSession() as Session:
-            async with Session.get('https://httpbin.org/ip', proxy=f'{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}', timeout=10) as Response:
-                if Response.status == 200:
-                    return True
-                return False
-    except Exception as e:
-        if not isinstance(e, tuple(ExceptionList)):
-            return False
-        Logger.Debug(f'∙ Failed to verify Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
-        Console().print_exception(max_frames=1)
-        return False   
-
 async def Show(Proxies, Limit):
     Count = Limit
     while True:
@@ -82,7 +55,7 @@ async def Show(Proxies, Limit):
                 break
 
             Count -= 1
-            Logger.Debug(f'∙ [{Limit - Count}/{Limit}] Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port} - Status: ' + ('[green]Verified[/green]' if await Verify(Proxy) else '[red]Failed[/red]'))
+            Logger.Debug(f'∙ [{Limit - Count}/{Limit}] Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
             
             os.makedirs('proxies', exist_ok=True)
             with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
