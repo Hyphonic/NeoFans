@@ -64,7 +64,7 @@ async def Show(Proxies, Limit):
             Console().print_exception()
             Logger.Error(f'Error processing proxy: {e}')
 
-Limit = 50
+Limit = 100
 
 Logger.Info(f'Scraping {Limit} Proxies:')
 
