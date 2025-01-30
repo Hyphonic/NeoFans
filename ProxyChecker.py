@@ -55,6 +55,7 @@ async def Verify(Proxy):
                 return False
     except Exception:
         Logger.Debug(f'∙ Failed to verify Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
+        Console().print_exception(max_frames=1)
         return False
 
 async def Show(Proxies, Limit):
@@ -73,7 +74,7 @@ async def Show(Proxies, Limit):
                 File.write(f'{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}\n')
             
         except Exception as e:
-            Console().print_exception()
+            Console().print_exception(max_frames=1)
             Logger.Error(f'Error processing proxy: {e}')
 
 Limit = 100
