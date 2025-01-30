@@ -65,7 +65,7 @@ async def Show(Proxies, Limit):
             Console().print_exception(max_frames=1)
             Logger.Error(f'Error processing proxy: {e}')
 
-Limit = 100
+Limit = 300
 
 Logger.Info(f'Scraping {Limit} Proxies:')
 
@@ -87,7 +87,7 @@ Broker = Broker(
         'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/http.txt', # HTTP
         'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/http/http.txt' # HTTP
         ],
-    max_conn=400,
+    max_conn=500,
     timeout=10,
     max_tries=1,
     )
