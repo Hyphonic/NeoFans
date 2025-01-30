@@ -132,12 +132,25 @@ async def GetProxies(Provider):
     FormattedProxies = []
     for Protocol, ProxyList in ProxyLists.items():
         for proxy in ProxyList:
-            host, port = proxy.split(':')
-            FormattedProxies.append({
-                'host': host,
-                'port': int(port),
-                'protocol': Protocol.upper()
-            })
+            try:
+                # Handle IPv6 addresses that contain multiple colons
+                if proxy.count(':') > 1:
+                    # Split from right once to handle IPv6
+                    host, port = proxy.rsplit(':', 1)
+                else:
+                    host, port = proxy.split(':')
+                
+                # Validate port
+                port = int(port)
+                if 1 <= port <= 65535:
+                    FormattedProxies.append({
+                        'host': host,
+                        'port': port,
+                        'protocol': Protocol.upper()
+                    })
+            except (ValueError, IndexError) as e:
+                Logger.Error(f'Invalid proxy format: {proxy} ({str(e)})')
+                continue
 
     return FormattedProxies
 
