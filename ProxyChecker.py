@@ -2,10 +2,7 @@ from rich.console import Console
 from proxybroker import Broker
 import asyncio
 import aiohttp
-import random
-import json
 import os
-import re
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
 
@@ -68,7 +65,7 @@ async def Show(Proxies, Limit):
             Console().print_exception(max_frames=1)
             Logger.Error(f'Error processing proxy: {e}')
 
-Limit = 500
+Limit = 1000
 
 Logger.Info(f'Scraping {Limit} Proxies:')
 
@@ -78,158 +75,43 @@ for ProxyType in ['http', 'https', 'socks5']:
         with open(FilePath, 'w') as File:
             File.truncate()
 
-async def GetProxies(Provider):
-    ProxyLists = {
-        'http': [],
-        'socks4': [],
-        'socks5': []
-    }
-
-    for Type in Provider:
-        if Type == 'direct':
-            for Protocol in Provider[Type]:
-                for Url in Provider[Type][Protocol]:
-                    Logger.Debug(f'Getting Proxies from: {Url}')
-                    async with aiohttp.ClientSession() as Session:
-                        async with Session.get(Url) as Response:
-                            if Response.status == 200:
-                                Proxies = await Response.text()
-                                for Proxy in Proxies.split('\n'):
-                                    Proxy = Proxy.strip()
-                                    if Proxy:
-                                        # Strip any existing protocol prefix
-                                        CleanProxy = re.sub(r'^(http|socks4|socks5)://', '', Proxy)
-                                        ProxyLists[Protocol].append(CleanProxy)
-                            else:
-                                Logger.Error(f'Failed to get proxies from: {Url}')
-
-        elif Type == 'indirect':
-            for Protocol in Provider[Type]:
-                for Url in Provider[Type][Protocol]:
-                    Logger.Debug(f'Fetching Indirect Proxies from: {Url}')
-                    async with aiohttp.ClientSession() as Session:
-                        async with Session.get(Url) as Response:
-                            if Response.status == 200:
-                                try:
-                                    Data = await Response.json()
-                                    for Entry in Data.get("data", []):
-                                        if "ipPort" in Entry:
-                                            Proxy = Entry["ipPort"]
-                                        elif "ip" in Entry and "port" in Entry:
-                                            Proxy = f'{Entry["ip"]}:{Entry["port"]}'
-                                        else:
-                                            continue
-                                        
-                                        # Strip any existing protocol prefix
-                                        CleanProxy = re.sub(r'^(http|socks4|socks5)://', '', Proxy)
-                                        ProxyLists[Protocol].append(CleanProxy)
-                                except json.JSONDecodeError:
-                                    Logger.Error(f'Invalid JSON from: {Url}')
-                            else:
-                                Logger.Error(f'Failed to get proxies from: {Url}')
-
-    # Format proxies as structured data instead of URLs
-    FormattedProxies = []
-    for Protocol, ProxyList in ProxyLists.items():
-        for proxy in ProxyList:
-            try:
-                # Handle IPv6 addresses that contain multiple colons
-                if proxy.count(':') > 1:
-                    # Split from right once to handle IPv6
-                    host, port = proxy.rsplit(':', 1)
-                else:
-                    host, port = proxy.split(':')
-                
-                # Validate port
-                port = int(port)
-                if 1 <= port <= 65535:
-                    FormattedProxies.append({
-                        'host': host,
-                        'port': port,
-                        'protocol': Protocol.upper()
-                    })
-            except (ValueError, IndexError) as e:
-                Logger.Error(f'Invalid proxy format: {proxy} ({str(e)})')
-                continue
-
-    return FormattedProxies
-
-Providers = [
-    {
-        'direct': {
-            'http': [
-                'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt',
-                'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/http.txt',
-                'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt',
-                'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/http/http.txt',
-                'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/http.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt',
-                'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=1000'
-            ],
-            'socks4': [
-                'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks4.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt',
-                'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/socks4.txt',
-                'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt',
-                'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/socks4/socks4.txt',
-                'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/socks4.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt',
-                'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks4&timeout=1000'
-            ],
-            'socks5': [
-                'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks5.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks5.txt',
-                'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/socks5.txt',
-                'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt',
-                'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/socks5/socks5.txt',
-                'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/socks5.txt',
-                'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks5.txt',
-                'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=1000'
-            ]
-        },
-        'indirect': {
-            'http': [
-                'http://pubproxy.com/api/proxy?type=http', # {"data":[{"ipPort":"<ip>:<port>"}]}
-
-            ],
-            'socks4': [
-                'http://pubproxy.com/api/proxy?type=socks4', # {"data":[{"ipPort":"<ip>:<port>"}]}
-            ],
-            'socks5': [
-                'http://pubproxy.com/api/proxy?type=socks5', # {"data":[{"ipPort":"<ip>:<port>"}]}
-            ]
-        }
-    }
-]
-
-async def Main():
-    AllProxies = []
-    for Provider in Providers:
-        Proxies = await GetProxies(Provider)
-        AllProxies.extend(Proxies)
-    
-    Logger.Info(f'Found {len(AllProxies)} Proxies.')
-    Logger.Info('Here are 10 random proxies:')
-    for Proxy in random.sample(AllProxies, 10):
-        Logger.Debug(f'∙ {Proxy["protocol"]}://{Proxy["host"]}:{Proxy["port"]}')
-    
-    Queue = asyncio.Queue()
-    ProxyBroker = Broker(
-        Queue,
-        max_conn=500,
-        timeout=10,
-        max_tries=1
+Proxies = asyncio.Queue()
+Broker = Broker(
+    Proxies,
+    providers=[
+        'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt',
+            'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/http.txt',
+            'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/http/data.txt',
+            'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/http/http.txt',
+            'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/http.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt',
+            'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=1000',
+            'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks4.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt',
+            'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/socks4.txt',
+            'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks4/data.txt',
+            'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/socks4/socks4.txt',
+            'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/socks4.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks4.txt',
+            'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks4&timeout=1000',
+            'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/socks5.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks5.txt',
+            'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/socks5.txt',
+            'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/protocols/socks5/data.txt',
+            'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/socks5/socks5.txt',
+            'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/socks5.txt',
+            'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks5.txt',
+            'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=1000'
+        ],
+    max_conn=500,
+    timeout=10,
+    max_tries=1,
     )
-    
-    await asyncio.gather(
-        ProxyBroker.find(
-            types=['HTTP', 'HTTPS', 'SOCKS5'],
-            data=[f'{p["host"]}:{p["port"]}' for p in AllProxies],
-            limit=Limit
-        ),
-        Show(Queue, Limit)
-    )
+Tasks = asyncio.gather(
+    Broker.find(types=[('HTTP', ('Anonymous', 'High')), 'HTTPS', 'SOCKS5'], limit=Limit),
+    Show(Proxies, Limit)
+)
 
-if __name__ == '__main__':
-    asyncio.run(Main())
+Loop = asyncio.get_event_loop()
+Loop.run_until_complete(Tasks)
