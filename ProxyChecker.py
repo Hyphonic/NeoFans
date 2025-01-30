@@ -184,26 +184,28 @@ Providers = [
 ]
 
 async def Main():
+    # Get proxies first
     AllProxies = []
     for Provider in Providers:
         Proxies = await GetProxies(Provider)
         AllProxies.extend(list(set(Proxies)))
-    return AllProxies
-
-ProxiesSorted = asyncio.run(Main())
-Logger.Info(f'Found {len(ProxiesSorted)} Proxies.')
-
-Proxies = asyncio.Queue()
-Broker = Broker(
-    Proxies,
-    max_conn=500,
-    timeout=10,
-    max_tries=1,
+    
+    Logger.Info(f'Found {len(AllProxies)} Proxies.')
+    
+    # Setup queue and broker
+    Queue = asyncio.Queue()
+    ProxyBroker = Broker(
+        Queue,
+        max_conn=500,
+        timeout=10,
+        max_tries=1
     )
-Tasks = asyncio.gather(
-    Broker.find(data=ProxiesSorted, limi=Limit),
-    Show(Proxies, Limit)
-)
+    
+    # Run tasks
+    await asyncio.gather(
+        ProxyBroker.find(data=AllProxies, limit=Limit),
+        Show(Queue, Limit)
+    )
 
-Loop = asyncio.get_event_loop()
-Loop.run_until_complete(Tasks)
+if __name__ == '__main__':
+    asyncio.run(Main())
