@@ -81,11 +81,14 @@ Broker = Broker(
         'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt', # All types
         'https://raw.githubusercontent.com/monosans/proxy-list/refs/heads/main/proxies_anonymous/all.txt', # All types (Anonymous)
         'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt', # HTTP
-        'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt' # HTTP
+        'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt', # HTTP
+        'https://raw.githubusercontent.com/mmpx12/proxy-list/refs/heads/master/proxies.txt', # All types
+        'https://raw.githubusercontent.com/Zaeem20/FREE_PROXIES_LIST/refs/heads/master/http.txt', # HTTP
+        'https://raw.githubusercontent.com/officialputuid/KangProxy/refs/heads/KangProxy/http/http.txt' # HTTP
         ],
-    max_conn=200,
+    max_conn=400,
     timeout=10,
-    max_tries=3,
+    max_tries=1,
     )
 Tasks = asyncio.gather(
     Broker.find(types=[('HTTP', ('Anonymous', 'High')), 'HTTPS', 'SOCKS5'], limit=Limit),
