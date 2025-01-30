@@ -1,6 +1,7 @@
 from rich.console import Console
 from proxybroker import Broker
 import asyncio
+import aiohttp
 import os
 
 LOG_LEVEL = 0  # 0: Debug, 1: Info, 2: Warning, 3: Error, 4: Critical
@@ -45,6 +46,17 @@ class RichLogger:
 
 Logger = RichLogger()
 
+async def Verify(Proxy):
+    try:
+        async with aiohttp.ClientSession() as Session:
+            async with Session.get('https://httpbin.org/ip', proxy=f'{list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}', timeout=10) as Response:
+                if Response.status == 200:
+                    return True
+                return False
+    except Exception:
+        Logger.Debug(f'∙ Failed to verify Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
+        return False
+
 async def Show(Proxies, Limit):
     Count = Limit
     while True:
@@ -54,7 +66,7 @@ async def Show(Proxies, Limit):
                 break
 
             Count -= 1
-            Logger.Debug(f'∙ [{Limit - Count}/{Limit}] Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
+            Logger.Debug(f'∙ [{Limit - Count}/{Limit}] Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port} - Status: ' + ('[green]Verified[/green]' if await Verify(Proxy) else '[red]Failed[/red]'))
             
             os.makedirs('proxies', exist_ok=True)
             with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
