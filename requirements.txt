@@ -4,5 +4,4 @@ aiofiles
 python-dotenv
 backoff
 httpx[socks]
-proxybroker
 git+https://github.com/bluet/proxybroker2.git

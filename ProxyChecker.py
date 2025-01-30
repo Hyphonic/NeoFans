@@ -54,7 +54,7 @@ async def Show(Proxies, Limit):
                 break
 
             Count -= 1
-            Logger.Debug(f'∙ {Limit - Count} Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
+            Logger.Debug(f'∙ [{Limit - Count}/{Limit}] Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
             
             os.makedirs('proxies', exist_ok=True)
             with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
@@ -77,10 +77,18 @@ for ProxyType in ['http', 'https', 'socks5']:
 Proxies = asyncio.Queue()
 Broker = Broker(
     Proxies,
-    providers=[]
+    providers=[
+        'https://raw.githubusercontent.com/proxifly/free-proxy-list/refs/heads/main/proxies/all/data.txt', # All types
+        'https://raw.githubusercontent.com/monosans/proxy-list/refs/heads/main/proxies_anonymous/all.txt', # All types (Anonymous)
+        'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/http.txt', # HTTP
+        'https://raw.githubusercontent.com/TheSpeedX/PROXY-List/refs/heads/master/http.txt' # HTTP
+        ],
+    max_conn=200,
+    timeout=10,
+    max_tries=3,
     )
 Tasks = asyncio.gather(
-    Broker.find(types=['HTTP', 'HTTPS', 'SOCKS5'], limit=Limit),
+    Broker.find(types=[('HTTP', ('Anonymous', 'High')), 'HTTPS', 'SOCKS5'], limit=Limit),
     Show(Proxies, Limit)
 )
 
