@@ -45,14 +45,16 @@ class RichLogger:
 
 Logger = RichLogger()
 
-async def Show(Proxies):
+async def Show(Proxies, Limit):
+    Count = Limit
     while True:
         try:
             Proxy = await Proxies.get()
             if Proxy is None:
                 break
-            
-            Logger.Debug(f'∙ Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
+
+            Count -= 1
+            Logger.Debug(f'∙ {Limit - Count} Found Proxy: {list(Proxy.types)[0].lower()}://{Proxy.host}:{Proxy.port}')
             
             os.makedirs('proxies', exist_ok=True)
             with open(f'proxies/{list(Proxy.types)[0].lower()}.txt', 'a') as File:
@@ -79,7 +81,7 @@ Broker = Broker(
     )
 Tasks = asyncio.gather(
     Broker.find(types=['HTTP', 'HTTPS', 'SOCKS5'], limit=Limit),
-    Show(Proxies)
+    Show(Proxies, Limit)
 )
 
 Loop = asyncio.get_event_loop()
