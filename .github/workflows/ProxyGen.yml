@@ -35,3 +35,10 @@ jobs:
                 git add --all
                 git commit -m "Update Proxies 🔼"
                 git push
+            
+            - name: 🔁 Trigger Next Workflow
+              if: success()
+              run: |
+                gh workflow run "Proxy Gen" --ref main
+              env:
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
