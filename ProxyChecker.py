@@ -65,7 +65,7 @@ async def Show(Proxies, Limit):
             Console().print_exception(max_frames=1)
             Logger.Error(f'Error processing proxy: {e}')
 
-Limit = 1000
+Limit = 500
 
 Logger.Info(f'Scraping {Limit} Proxies:')
 
@@ -104,7 +104,7 @@ Broker = Broker(
             'https://raw.githubusercontent.com/ErcinDedeoglu/proxies/refs/heads/main/proxies/socks5.txt',
             'https://api.proxyscrape.com/v2/?request=displayproxies&protocol=socks5&timeout=1000'
         ],
-    max_conn=500,
+    max_conn=200,
     timeout=10,
     max_tries=1,
     )
