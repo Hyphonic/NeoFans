@@ -128,10 +128,16 @@ async def GetProxies(Provider):
                             else:
                                 Logger.Error(f'Failed to get proxies from: {Url}')
 
-    # Format proxies with correct protocol prefix
+    # Format proxies as structured data instead of URLs
     FormattedProxies = []
     for Protocol, ProxyList in ProxyLists.items():
-        FormattedProxies.extend([f'{Protocol}://{proxy}' for proxy in ProxyList])
+        for proxy in ProxyList:
+            host, port = proxy.split(':')
+            FormattedProxies.append({
+                'host': host,
+                'port': int(port),
+                'protocol': Protocol.upper()
+            })
 
     return FormattedProxies
 
@@ -185,19 +191,16 @@ Providers = [
 ]
 
 async def Main():
-    # Get proxies first
     AllProxies = []
     for Provider in Providers:
         Proxies = await GetProxies(Provider)
-        AllProxies.extend(list(set(Proxies)))
+        AllProxies.extend(Proxies)
     
     Logger.Info(f'Found {len(AllProxies)} Proxies.')
-
     Logger.Info('Here are 10 random proxies:')
     for Proxy in random.sample(AllProxies, 10):
-        Logger.Debug(f'∙ {Proxy}')
+        Logger.Debug(f'∙ {Proxy["protocol"]}://{Proxy["host"]}:{Proxy["port"]}')
     
-    # Setup queue and broker
     Queue = asyncio.Queue()
     ProxyBroker = Broker(
         Queue,
@@ -206,11 +209,10 @@ async def Main():
         max_tries=1
     )
     
-    # Run tasks with required types parameter
     await asyncio.gather(
         ProxyBroker.find(
-            types=['HTTP', 'HTTPS', 'SOCKS5'],  # Required parameter
-            data=AllProxies,  # Optional data parameter
+            types=['HTTP', 'HTTPS', 'SOCKS5'],
+            data=[f'{p["host"]}:{p["port"]}' for p in AllProxies],
             limit=Limit
         ),
         Show(Queue, Limit)
