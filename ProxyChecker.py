@@ -62,9 +62,15 @@ async def Show(Proxies):
             Console().print_exception()
             Logger.Error(f'Error processing proxy: {e}')
 
-Limit = 100
+Limit = 500
 
 Logger.Info(f'Scraping {Limit} Proxies:')
+
+for ProxyType in ['http', 'https', 'socks5']:
+    FilePath = f'proxies/{ProxyType}.txt'
+    if os.path.exists(FilePath):
+        with open(FilePath, 'w') as File:
+            File.truncate()
 
 Proxies = asyncio.Queue()
 Broker = Broker(
