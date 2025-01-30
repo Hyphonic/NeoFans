@@ -201,9 +201,13 @@ async def Main():
         max_tries=1
     )
     
-    # Run tasks
+    # Run tasks with required types parameter
     await asyncio.gather(
-        ProxyBroker.find(data=AllProxies, limit=Limit),
+        ProxyBroker.find(
+            types=['HTTP', 'HTTPS', 'SOCKS5'],  # Required parameter
+            data=AllProxies,  # Optional data parameter
+            limit=Limit
+        ),
         Show(Queue, Limit)
     )
 
