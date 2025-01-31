@@ -22,7 +22,7 @@ jobs:
             gh run delete "$run_id" --repo "$REPO"
           done
 
-      - name: Pyscan 
+      - name: 📜 Pyscan 
         uses: aswinnnn/pyscan-check@v1.0.0
         with:
           upload-artifact: true
