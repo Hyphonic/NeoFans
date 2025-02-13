@@ -277,9 +277,11 @@ class Fetcher:
             if Response.status_code == 200:
                 return Response.json(), Response.status_code
             return None, Response.status_code
-        except Exception:
-            return None, None
         except httpx.TimeoutException:
+            Logger.Warning(f'Timeout occurred while fetching {Url}')
+            return None, None
+        except Exception as e:
+            Logger.Error(f'Error occurred while fetching {Url}: {e}')
             return None, None
 
     async def Scrape(self):
@@ -772,7 +774,9 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Logger.Warning('Program interrupted by user')
-    except Exception:
+    except Exception as e:
+        if not isinstance(e, [KeyboardInterrupt, httpx.ConnectTimeout]):
+            pass
         Console(force_terminal=True).print_exception(max_frames=1)
     finally:
         Logger.Info('Exiting program')
