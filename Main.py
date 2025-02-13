@@ -774,9 +774,7 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Logger.Warning('Program interrupted by user')
-    except Exception as e:
-        if not isinstance(e, [KeyboardInterrupt, httpx.ConnectTimeout]):
-            pass
+    except Exception:
         Console(force_terminal=True).print_exception(max_frames=1)
     finally:
         Logger.Info('Exiting program')
