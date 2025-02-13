@@ -106,6 +106,8 @@ class FavoriteFetcher:
                     Config[Service]['ids'].append(CreatorId)
                     Config[Service]['names'].append(CreatorName)
 
+SentRequestInfo = False
+
 class AsyncDownloader:
     def __init__(self, FileData: tuple, Platform: str, Creator: str):
         self.Hash = FileData[0]
@@ -129,6 +131,7 @@ class AsyncDownloader:
         self.PartialPath = f'{self.FullPath}.partial'
 
     async def Download(self):
+        global SentRequestInfo
         try:
             Response = await self.Client.get(self.Url)
             if Response.status_code == 200:
@@ -148,7 +151,8 @@ class AsyncDownloader:
                         os.remove(self.PartialPath)
                     return False
             else:
-                #Logger.Debug(f'Failed to download {self.Hash} from {self.Url} ({Response.status_code})')
+                Logger.Debug(f'Failed to download {self.Hash} from {self.Url} ({Response.status_code}) ({self.Client.headers}) ({self.Client.cookies}) ({self.Client.base_url})') if not SentRequestInfo else None
+                SentRequestInfo = True
                 return False
 
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
