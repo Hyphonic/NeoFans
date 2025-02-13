@@ -115,16 +115,23 @@ class AsyncDownloader:
         self.Path = FileData[2]
         self.Platform = Platform
         self.Creator = Creator
+
         # try:
         #         Proxy = random.choice(open('proxies/socks5.txt').read().splitlines())
         # except FileNotFoundError:
         #     pass
-        self.Client = httpx.AsyncClient(timeout=30.0, verify=False)
+
+        self.Client = httpx.AsyncClient(
+            timeout=30.0,
+            verify=False,
+            follow_redirects=True
+            )
+        
         self.Client.headers.update({
             'accept': 'application/json',
             'accept-encoding': 'gzip, deflate, br',
             'accept-language': 'en-US,en;q=0.9',
-            'user-agent': 'Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36'
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         })
 
         self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
