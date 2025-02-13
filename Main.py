@@ -118,6 +118,12 @@ class AsyncDownloader:
         # except FileNotFoundError:
         #     pass
         self.Client = httpx.AsyncClient(timeout=30.0, verify=False)
+        self.Client.headers.update({
+            'accept': 'application/json',
+            'accept-encoding': 'gzip, deflate, br',
+            'accept-language': 'en-US,en;q=0.9',
+            'user-agent': 'Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36'
+        })
 
         self.FullPath = self.Path + self.Hash + os.path.splitext(self.Url)[1]
         self.PartialPath = f'{self.FullPath}.partial'
@@ -740,7 +746,7 @@ async def Main():
                 FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
-                Logger.Debug(f'\n\n∙ {Success} \n\n')
+                #Logger.Debug(f'\n\n∙ {Success} \n\n')
 
                 if Success:
                     # Store successful download
