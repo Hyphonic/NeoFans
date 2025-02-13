@@ -142,7 +142,7 @@ class AsyncDownloader:
                         os.remove(self.PartialPath)
                     return False
             else:
-                Logger.Debug(f'Failed to download {self.Hash} from {self.Url} ({Response.status_code})')
+                #Logger.Debug(f'Failed to download {self.Hash} from {self.Url} ({Response.status_code})')
                 return False
 
         except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
