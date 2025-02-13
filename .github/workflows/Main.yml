@@ -40,11 +40,11 @@ jobs:
       - name: 📦 Install Dependencies
         run: pip install -r requirements.txt
 
-      # - name: 🔧 Install Rclone
-      #   uses: AnimMouse/setup-rclone@v1
-      #   with:
-      #     rclone_config: ${{ secrets.PIXELDRAIN_CONF }}
-      #     disable_base64: true
+      - name: 🔧 Install Rclone
+        uses: AnimMouse/setup-rclone@v1
+        with:
+          rclone_config: ${{ secrets.PIXELDRAIN_CONF }}
+          disable_base64: true
 
       - name: ⏬ Download All Content
         env:
@@ -72,15 +72,15 @@ jobs:
           git commit -m "Update cached hashes"
           git push
 
-      # - name: 🔁 Trigger Next Workflow
-      #   if: success()
-      #   run: |
-      #     gh workflow run "Download Posts" --ref main
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: 🔁 Trigger Next Workflow
+        if: success()
+        run: |
+          gh workflow run "Download Posts" --ref main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # - name: 🌐 Upload Data with Rclone
-      #   run: |
-      #     echo "🟢 Uploading Data to Pixeldrain..."
-      #     rclone copy . Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
-      #     echo "🟢 Upload complete."
+      - name: 🌐 Upload Data with Rclone
+        run: |
+          echo "🟢 Uploading Data to Pixeldrain..."
+          rclone copy . Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
+          echo "🟢 Upload complete."
