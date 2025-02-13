@@ -162,20 +162,6 @@ class AsyncDownloader:
             if os.path.exists(self.PartialPath) and not os.path.exists(self.FullPath):
                 os.remove(self.PartialPath)
             await self.Client.aclose()
-    
-    async def Size(self):
-        try:
-            Response = await self.Client.head(self.Url)
-            if Response.status_code == 200:
-                return int(Response.headers['content-length'])
-            else:
-                return 0
-        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
-            return 0
-        except Exception as e:
-            if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
-                Console(force_terminal=True).print_exception(max_frames=1)
-            return 0
 
 class HashManager:
     '''Handles loading and saving cached hashes.'''
@@ -715,8 +701,6 @@ async def Main():
         '{task.fields[creator]}',
         '•', 
         '{task.fields[progress]}',
-        '•',
-        '{task.fields[size]}',
         TimeElapsedColumn(),
         console=Console(force_terminal=True),
     ) as ProgressBar:
@@ -725,7 +709,6 @@ async def Main():
             total=len(AllFiles),
             creator="",
             progress="0/0",
-            size="0B"
         )
         CompletedFiles = 0
         PlatformsHandled = []
@@ -743,7 +726,6 @@ async def Main():
                     PlatformsHandled.append(Platform)
                 
                 Downloader = AsyncDownloader(FileData, Platform, Creator)
-                FileSize = await Downloader.Size()
                 Success = await Downloader.Download()
 
                 #Logger.Debug(f'\n\n∙ {Success} \n\n')
@@ -760,7 +742,6 @@ async def Main():
                     advance=1,
                     creator=f'{Name}',
                     progress=f'{CompletedFiles}/{len(AllFiles)}',
-                    size=f'{HumanizeBytes(FileSize)}'
                 )
                 ProgressBar.refresh()
             
