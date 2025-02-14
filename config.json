@@ -2275,7 +2275,7 @@
         "gumroad": "[hot_pink]Gumroad[/hot_pink]"
     },
     "threads": {
-        "max_workers": 32
+        "max_workers": 64
     },
     "enabled_platforms": {
         "rule34": true,
