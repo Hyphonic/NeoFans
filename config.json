@@ -2287,7 +2287,7 @@
         "fanbox": true,
         "gumroad": true
     },
-    "global_limit": 2000,
+    "global_limit": 1000,
     "platform_limit_debug": 1,
     "cached_hashes": {},
     "version": "3.0.3",
