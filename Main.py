@@ -1,8 +1,9 @@
-import aiofiles.os
 from rich.console import Console
 from dotenv import load_dotenv
+from httpx import HTTPError
 from typing import Dict
 import urllib.parse
+import aiofiles.os
 import aiofiles
 import asyncio
 import httpx
@@ -162,7 +163,8 @@ class AsyncDownloader:
                 SentRequestInfo = True
                 return False
 
-        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+        except HTTPError as e:
+            Logger.Warning(f'HTTP error while downloading {self.Hash}: {str(e)}')
             return False
         except Exception as e:
             if not isinstance(e, (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError)):
@@ -277,8 +279,8 @@ class Fetcher:
             if Response.status_code == 200:
                 return Response.json(), Response.status_code
             return None, Response.status_code
-        except httpx.TimeoutException:
-            Logger.Warning(f'Timeout occurred while fetching {Url}')
+        except HTTPError as e:
+            Logger.Warning(f'HTTP error while fetching {Url}: {str(e)}')
             return None, None
         except Exception as e:
             Logger.Error(f'Error occurred while fetching {Url}: {e}')
@@ -774,7 +776,8 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Logger.Warning('Program interrupted by user')
-    except Exception:
+    except Exception as e:
+        Logger.Error(f'Unexpected error: {str(e)}')
         Console(force_terminal=True).print_exception(max_frames=1)
     finally:
         Logger.Info('Exiting program')
