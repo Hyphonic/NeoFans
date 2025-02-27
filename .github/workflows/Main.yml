@@ -59,6 +59,7 @@ jobs:
       - name: 📃 List Files
         run: |
           cat Data/*.json
+          tree
 
       - name: 🔼 Commit updated hashes
         if: success()

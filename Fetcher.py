@@ -265,7 +265,7 @@ class Downloader:
 
         async with self.Semaphore:
             try:
-                if shutil.disk_usage('.').free < 23e+9:
+                if shutil.disk_usage('.').free < 25e+9:
                     self.Log.warning('Low Disk Space!')
                     sys.exit(0)
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
