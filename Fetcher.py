@@ -19,26 +19,20 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 import logging
 
-Console = RichConsole(theme=Theme({
-    'log.time': 'bright_black',
-    'logging.level.info': 'green',
-    'logging.level.warning': 'yellow',
-    'logging.level.error': 'red'
-}),
+# Common console configuration
+Console = RichConsole(
+    theme=Theme({
+        'log.time': 'bright_black',
+        'logging.level.info': 'green',
+        'logging.level.warning': 'yellow',
+        'logging.level.error': 'red'
+    }),
     force_terminal=True,
     width=120,
     log_path=False
 )
 
-Handler = RichHandler(
-    markup=True,
-    rich_tracebacks=True,
-    show_time=True,
-    console=Console,
-    show_path=False,
-    omit_repeated_times=True
-)
-
+# Single handler configuration
 ConsoleHandler = RichHandler(
     markup=True,
     rich_tracebacks=True,
@@ -48,16 +42,12 @@ ConsoleHandler = RichHandler(
     omit_repeated_times=True
 )
 
-ConsoleHandler.setFormatter(logging.Formatter(
-    '%(message)s',
-    datefmt='[%H:%M:%S]'
-))
+# Set formatter once
+ConsoleHandler.setFormatter(
+    logging.Formatter('%(message)s', datefmt='[%H:%M:%S]')
+)
 
-Handler.setFormatter(logging.Formatter(
-    '%(asctime)s %(message)s',
-    datefmt='[%H:%M:%S]'
-))
-
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     handlers=[ConsoleHandler],
@@ -74,7 +64,7 @@ def ErrorLogger(Error: Exception) -> None:
     Console.print_exception(
         max_frames=1, 
         show_locals=True, 
-        width=Console.width if Console.width else 120
+        width=Console.width or 120
     )
 
 Install(show_locals=True)
@@ -270,7 +260,7 @@ class Downloader:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
-        self.Semaphore = asyncio.Semaphore(10)
+        self.Semaphore = asyncio.Semaphore(16)
         self.CompletedDownloads = 0
         self.TotalFiles = 0
         self.Stopped = False
