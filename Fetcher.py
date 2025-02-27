@@ -272,7 +272,7 @@ class Downloader:
 
         async with self.Semaphore:
             try:
-                if shutil.disk_usage('.').free < 24e+9:
+                if shutil.disk_usage('.').free < 24e+9 and not self.Stopped:
                     self.Log.warning('Low Disk Space!')
                     self.Stopped = True
                     raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
