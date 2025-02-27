@@ -220,7 +220,7 @@ class Fetcher:
                             for Attachment in Post.get('attachments', []):
                                 if Counter >= self.PostLimit:
                                     break
-                                
+
                                 if Attachment.get('path'):
                                     FilePath = Path(Attachment['path'])
                                     FileInfo = FileData(
@@ -308,12 +308,6 @@ if __name__ == '__main__':
             Fetch = Fetcher(Session, Log, ErrorLogger)
             Download = Downloader(Session, Log, ErrorLogger)
             await Fetch.Favorites()
-
-            Fetch.Data = {Platform: {**Fetch.Data[Platform],
-                                    'Creators': {Service: Creators[:Fetch.Limit] for Service,
-                                    Creators in Fetch.Data[Platform]['Creators'].items()}}
-                                    for Platform in Fetch.Data
-                                    }
 
             for Platform in Fetch.Data:
                 for Service in Fetch.Data[Platform]['Creators']:
