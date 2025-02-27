@@ -96,6 +96,8 @@ class CreatorData:
 class LowDiskSpace(Exception):
     pass
 
+Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
+
 # Fetcher Class
 class Fetcher:
     def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
@@ -242,9 +244,7 @@ class Fetcher:
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
                                         if self.DownloadQueue.full():
                                             self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize})')
-                                            while self.DownloadQueue.full():
-                                                await asyncio.sleep(1)
-                                            await self.DownloadQueue.put(FileInfo)
+                                            break
                                         else:
                                             await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
