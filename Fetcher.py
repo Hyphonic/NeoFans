@@ -267,13 +267,13 @@ class Downloader:
         
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
+            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]')
             return
 
         async with self.Semaphore:
             try:
-                if shutil.disk_usage('.').free < 24e+9 and not self.Stopped:
-                    self.Log.warning('Low Disk Space!')
+                if shutil.disk_usage('.').free < 24e+9:
+                    self.Log.warning('Low Disk Space!') if not self.Stopped else None
                     self.Stopped = True
                     raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
