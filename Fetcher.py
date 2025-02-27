@@ -254,6 +254,7 @@ class Downloader:
         self.Semaphore = asyncio.Semaphore(10)
         self.CompletedDownloads = 0
         self.TotalFiles = 0
+        self.Stopped = False
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -261,6 +262,9 @@ class Downloader:
             self.Hashes = set()
     
     async def Download(self, File: FileData) -> None:
+        if self.Stopped:
+            return
+        
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
             self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
@@ -270,6 +274,7 @@ class Downloader:
             try:
                 if shutil.disk_usage('.').free < 24e+9:
                     self.Log.warning('Low Disk Space!')
+                    self.Stopped = True
                     raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                 await aiofiles.os.makedirs(OutPath, exist_ok=True)
@@ -283,9 +288,13 @@ class Downloader:
                             self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]')
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
+            except LowDiskSpace as Error:
+                raise Error
+            
             except Exception as Error:
-                self.ErrorLogger(Error)
-                self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash[:30]}...[/] ({Response.status})')
+                if not self.Stopped:
+                    self.ErrorLogger(Error)
+                    self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash[:30]}...[/] ({Response.status})')
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -344,6 +353,5 @@ if __name__ == '__main__':
         Log.warning(Error)
         sys.exit(0)
     except Exception as Error:
-        if isinstance(Error, (RuntimeError, UnboundLocalError, TypeError)):
-            pass
-        ErrorLogger(Error)
+        if not isinstance(Error, asyncio.CancelledError):
+            ErrorLogger(Error)
