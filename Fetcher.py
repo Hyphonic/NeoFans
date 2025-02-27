@@ -264,7 +264,7 @@ class Downloader:
         
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.info(f'[[bold cyan]{await Humanize(Free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
+            self.Log.info(f'[[bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
             return
 
         async with self.Semaphore:
@@ -278,12 +278,12 @@ class Downloader:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
-                            self.Log.info(f'[[bold cyan]{await Humanize(Free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash}[/]')
+                            self.Log.info(f'[[bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash}[/]')
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except Exception as Error:
                 self.ErrorLogger(Error)
-                self.Log.warning(f'[[bold cyan]{await Humanize(Free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
+                self.Log.warning(f'[[bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
