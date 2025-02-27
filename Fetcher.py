@@ -183,7 +183,7 @@ class Fetcher:
         self.Log.info(f'Fetched {Counter} Favorites')
     
     async def Posts(self, Creator: CreatorData) -> None:
-        self.Log.info(f'Fetching Posts From {Creator.Name}... ({Creator.ID})/{Creator.Service}')
+        #self.Log.info(f'Fetching Posts From {Creator.Name}... ({Creator.ID})/{Creator.Service}')
         TotalCounter = 0
         NewCounter = 0
         SkippedCounter = 0
@@ -250,7 +250,7 @@ class Fetcher:
                     break
         
         await Fetch(Creator)
-        self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} (Total: {TotalCounter}, Skipped: {SkippedCounter})')
+        self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
 
 # Downloader Class
 class Downloader:
