@@ -307,7 +307,7 @@ class Downloader:
                 self.CompletedDownloads += 1
                 self.Log.warning(
                     f'[{self.CompletedDownloads}/{self.TotalFiles}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                    f'[{self.Fetcher.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}] Skipping '
+                    f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
                     f'[bold cyan]{File.Hash[:30]}...[/] '
                 ) if not self.Stopped else None
                 return
