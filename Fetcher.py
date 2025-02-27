@@ -199,10 +199,10 @@ class Fetcher:
             nonlocal TotalCounter, NewCounter, SkippedCounter, Page
             while 'Hyphonical == Cool': # I'm always cool!
                 if self.DownloadQueue.qsize() >= QueueThreshold:
-                    self.Log.info(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+                    self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * 0.5): # 50% Of Queue Size
                         await asyncio.sleep(1)
-                    self.Log.info(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+                    self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
 
                 try:
                     async with self.Session.get(
@@ -288,7 +288,7 @@ class Downloader:
         
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
+            self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
             return
 
         async with self.Semaphore:
