@@ -344,4 +344,6 @@ if __name__ == '__main__':
         Log.warning(Error)
         sys.exit(0)
     except Exception as Error:
+        if isinstance(Error, (RuntimeError, UnboundLocalError, TypeError)):
+            pass
         ErrorLogger(Error)
