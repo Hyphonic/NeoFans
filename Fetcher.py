@@ -307,8 +307,8 @@ class Downloader:
                 if str(File.Hash) in self.Hashes:
                     self.CompletedDownloads += 1
                     self.Log.warning(
-                        f'[{self.CompletedDownloads}/{self.TotalFiles}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                        f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
+                        f'[[yellow]{self.CompletedDownloads}/{self.TotalFiles}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                        f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Skipping '
                         f'[bold cyan]{File.Hash[:30]}...[/] '
                     ) if not self.Stopped else None
                     return
@@ -334,8 +334,8 @@ class Downloader:
                                 self.CompletedDownloads += 1
                                 ElapsedTime = asyncio.get_event_loop().time() - StartTime
                                 self.Log.info(
-                                    f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                                    f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
+                                    f'[[yellow]{self.CompletedDownloads}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                                    f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Downloaded '
                                     f'[bold cyan]{File.Hash[:30]}...[/] '
                                     f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
                                 ) if not self.Stopped else None
@@ -348,8 +348,8 @@ class Downloader:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
                         self.Log.warning(
-                            f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
+                            f'[[yellow]{self.CompletedDownloads}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                            f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Failed To Download '
                             f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
                         )
             except LowDiskSpace as Error:
@@ -360,7 +360,7 @@ async def Humanize(Bytes: int) -> str:
         if Bytes < 1024.0:
             break
         Bytes /= 1024.0
-    return f'{Bytes:.2f} {Unit}'
+    return f'{Bytes:.2f} [green]{Unit}[/]'
 
 # JSON Encoder
 class Encoder(JSONEncoder):
