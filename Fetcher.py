@@ -7,6 +7,7 @@ import aiofiles.os
 import aiofiles
 import asyncio
 import aiohttp
+import shutil
 import json
 import os
 
@@ -246,7 +247,13 @@ class Downloader:
             self.Hashes = set()
     
     async def Download(self, File: FileData) -> None:
+        Free = shutil.disk_usage('.').free
+        if Free < 5e+9:
+            self.Log.warning('Low Disk Space!')
+            raise Exception('LowDiskSpace')
+        
         if str(File.Hash) in self.Hashes:
+            self.Log.info(f'Skipping [bold cyan]{File.Hash}[/]')
             return
 
         async with self.Semaphore:
@@ -264,7 +271,7 @@ class Downloader:
                                 await f.write(json.dumps(list(self.Hashes)))
             except Exception as Error:
                 self.ErrorLogger(Error)
-
+                self.Log.warning(f'Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
 # JSON Encoder
 class Encoder(JSONEncoder):
     def default(self, obj):
@@ -316,3 +323,8 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
+    except Exception('LowDiskSpace'):
+        Log.warning('Exiting Due To Low Disk Space...')
+        exit(0)
+    except Exception as Error:
+        ErrorLogger(Error)
