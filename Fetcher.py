@@ -26,7 +26,7 @@ Console = RichConsole(theme=Theme({
     'logging.level.error': 'red'
 }),
     force_terminal=True,
-    width=150,
+    width=120,
     log_path=False
 )
 
@@ -74,7 +74,7 @@ def ErrorLogger(Error: Exception) -> None:
     Console.print_exception(
         max_frames=1, 
         show_locals=True, 
-        width=Console.width if Console.width else 100
+        width=Console.width if Console.width else 120
     )
 
 Install(show_locals=True)
@@ -265,7 +265,7 @@ class Downloader:
 
         async with self.Semaphore:
             try:
-                if shutil.disk_usage('.').free < 25e+9:
+                if shutil.disk_usage('.').free < 24e+9:
                     self.Log.warning('Low Disk Space!')
                     sys.exit(0)
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
