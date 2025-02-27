@@ -20,7 +20,14 @@ from rich.logging import RichHandler
 from rich.theme import Theme
 import logging
 
-# Common console configuration
+# Config
+LowDiskSpaceThreshold = 5e+9 # 5GB
+SemaphoreLimit = 32
+QueueThresholds = [0.8, 0.5]
+PageOffset = 50
+StartingPage = 0
+
+# Logging Configuration
 Console = RichConsole(
     theme=Theme({
         'log.time': 'bright_black',
@@ -192,9 +199,8 @@ class Fetcher:
         TotalCounter = 0
         NewCounter = 0
         SkippedCounter = 0
-        Page = 0
-        PageOffset = 50
-        QueueThreshold = self.DownloadQueue.maxsize * 0.8 # 80% Of Queue Size
+        Page = StartingPage
+        QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[0]
 
         if self.Stopped:
             return
@@ -204,7 +210,7 @@ class Fetcher:
             while not self.Stopped:
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
-                    while self.DownloadQueue.qsize() > (QueueThreshold * 0.5): # 50% Of Queue Size
+                    while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[1]):
                         await asyncio.sleep(1)
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
 
@@ -277,7 +283,7 @@ class Downloader:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
-        self.Semaphore = asyncio.Semaphore(24)
+        self.Semaphore = asyncio.Semaphore(SemaphoreLimit)
         self.CompletedDownloads = 0
         self.TotalFiles = 0
         self.Stopped = False
@@ -299,7 +305,7 @@ class Downloader:
 
         async with self.Semaphore:
             try:
-                if shutil.disk_usage('.').free < 20e+9:
+                if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
                     self.Log.warning('Low Disk Space!') if not self.Stopped else None
                     self.Stopped = True
                     self.Fetcher.Stopped = True
