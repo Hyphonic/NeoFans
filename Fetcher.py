@@ -307,7 +307,7 @@ class Downloader:
                         Content = await Response.read()
                         FileSize = len(Content)
                         async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
-                            await F.write(await Response.read())
+                            await F.write(Content)
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
                             ElapsedTime = asyncio.get_event_loop().time() - StartTime
