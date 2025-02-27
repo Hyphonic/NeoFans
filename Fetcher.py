@@ -97,6 +97,7 @@ class Fetcher:
         self.Session = Session
         self.TotalFiles = 0
         self.DownloadQueue = DownloadQueue
+        self.Stopped = False
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -194,10 +195,13 @@ class Fetcher:
         Page = 0
         PageOffset = 50
         QueueThreshold = self.DownloadQueue.maxsize * 0.8 # 80% Of Queue Size
+
+        if self.Stopped:
+            return
         
         async def Fetch(Creator: CreatorData) -> None:
             nonlocal TotalCounter, NewCounter, SkippedCounter, Page
-            while 'Hyphonical == Cool': # I'm always cool!
+            while not self.Stopped:
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * 0.5): # 50% Of Queue Size
@@ -264,11 +268,12 @@ class Fetcher:
                     break
         
         await Fetch(Creator)
-        self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
+        if not self.Stopped:
+            self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
 
 # Downloader Class
 class Downloader:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger) -> None:
+    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
@@ -276,6 +281,7 @@ class Downloader:
         self.CompletedDownloads = 0
         self.TotalFiles = 0
         self.Stopped = False
+        self.Fetcher = Fetcher
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -296,6 +302,7 @@ class Downloader:
                 if shutil.disk_usage('.').free < 20e+9:
                     self.Log.warning('Low Disk Space!') if not self.Stopped else None
                     self.Stopped = True
+                    self.Fetcher.Stopped = True
                     raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
             
                 StartTime = asyncio.get_event_loop().time()
@@ -360,7 +367,7 @@ if __name__ == '__main__':
 
         async with aiohttp.ClientSession() as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
-            Download = Downloader(Session, Log, ErrorLogger)
+            Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
             # Start download processor
             DownloadTask = asyncio.create_task(ProcessDownloads(Download))
