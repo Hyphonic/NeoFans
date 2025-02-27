@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from typing import Union, Tuple
 from json import JSONEncoder
+from asyncio import Queue
 from pathlib import Path
 import aiofiles.os
 import aiofiles
@@ -90,15 +91,18 @@ class LowDiskSpace(Exception):
 
 # Fetcher Class
 class Fetcher:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger) -> None:
+    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
         self.TotalFiles = 0
+        self.DownloadQueue = DownloadQueue
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
+            self.Log.info(f'Loaded {len(self.Hashes)} Hashes')
         except FileNotFoundError:
+            self.Log.warning('No Hashes Found!')
             self.Hashes = set()
         self.Data = {
             'coomer':
@@ -162,7 +166,7 @@ class Fetcher:
                 ) as Response:
                     if Response.status == 200:
                         Creators = await Response.json()
-                        for Creator in Creators:  # Removed slice
+                        for Creator in Creators:
                             self.Data[Platform]['Creators'][Creator['service']].append(
                                 CreatorData(
                                     ID=Creator['id'],
@@ -219,6 +223,7 @@ class Fetcher:
                                             Extension=FilePath.suffix
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                        await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
                                         self.TotalFiles += 1
                                     else:
@@ -322,27 +327,37 @@ class Encoder(JSONEncoder):
 
 if __name__ == '__main__':
     async def Main() -> None:
-        async with aiohttp.ClientSession() as Session:
-            Fetch = Fetcher(Session, Log, ErrorLogger)
-            Download = Downloader(Session, Log, ErrorLogger)
-            await Fetch.Favorites()
+        DownloadQueue = Queue()
 
+        async def ProcessDownloads(Download: Downloader):
+            while True:
+                File = await DownloadQueue.get()
+                await Download.Download(File)
+                DownloadQueue.task_done()
+
+        async with aiohttp.ClientSession() as Session:
+            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
+            Download = Downloader(Session, Log, ErrorLogger)
+            
+            # Start download processor
+            DownloadTask = asyncio.create_task(ProcessDownloads(Download))
+            
+            await Fetch.Favorites()
+            
+            # Process creators
             for Platform in Fetch.Data:
                 for Service in Fetch.Data[Platform]['Creators']:
                     for Creator in Fetch.Data[Platform]['Creators'][Service]:
                         await Fetch.Posts(Creator)
             
             Fetch.Log.info(f'Fetched [bold cyan]{Fetch.TotalFiles}[/] Files')
-
             Download.TotalFiles = Fetch.TotalFiles
-            await aiofiles.os.makedirs('Data/Files', exist_ok=True)
-            Tasks = []
-            for Platform in Fetch.Data:
-                for Service in Fetch.Data[Platform]['Posts']:
-                    for File in Fetch.Data[Platform]['Posts'][Service]:
-                        Tasks.append(Download.Download(File))
-            await asyncio.gather(*Tasks)
-
+            
+            # Wait for all downloads to complete
+            await DownloadQueue.join()
+            DownloadTask.cancel()
+            
+            # Save final data
             await aiofiles.os.makedirs('Data', exist_ok=True)
             async with aiofiles.open('Data/Data.json', 'w', encoding='utf-8') as File:
                 await File.write(json.dumps(
@@ -350,7 +365,7 @@ if __name__ == '__main__':
                     indent=4,
                     ensure_ascii=False,
                     cls=Encoder
-                    ))
+                ))
 
     try:
         asyncio.run(Main())
