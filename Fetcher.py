@@ -100,7 +100,8 @@ class Fetcher:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
-        self.Limit = 1
+        self.CreatorLimit = 10
+        self.PostLimit = 1000
         self.TotalFiles = 0
         self.Data = {
             'coomer':
@@ -151,6 +152,7 @@ class Fetcher:
             }
 
     async def Favorites(self) -> None:
+        self.Log.info(f'Creator Limit: {self.CreatorLimit} | Post Limit: {self.PostLimit}')
         self.Log.info('Fetching Favorites...')
         Counter = 0
         Tasks = []
@@ -164,7 +166,7 @@ class Fetcher:
                 ) as Response:
                     if Response.status == 200:
                         Creators = await Response.json()
-                        for Creator in Creators:
+                        for Creator in Creators[:self.CreatorLimit]:
                             self.Data[Platform]['Creators'][Creator['service']].append(
                                 CreatorData(
                                     ID=Creator['id'],
@@ -197,7 +199,10 @@ class Fetcher:
                 ) as Response:
                     if Response.status == 200:
                         Posts = await Response.json()
-                        for Post in Posts:
+                        for Post in Posts[:self.PostLimit]:
+                            if Counter >= self.PostLimit:
+                                break
+
                             if Post.get('file') and Post['file'].get('path'):
                                 FilePath = Path(Post['file']['path'])
                                 FileInfo = FileData(
@@ -213,6 +218,9 @@ class Fetcher:
                                 self.TotalFiles += 1
                             
                             for Attachment in Post.get('attachments', []):
+                                if Counter >= self.PostLimit:
+                                    break
+                                
                                 if Attachment.get('path'):
                                     FilePath = Path(Attachment['path'])
                                     FileInfo = FileData(
@@ -270,12 +278,12 @@ class Downloader:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
-                            self.Log.info(f'[{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash}[/]')
+                            self.Log.info(f'[[bold cyan]{Humanize(Free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash}[/]')
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except Exception as Error:
                 self.ErrorLogger(Error)
-                self.Log.warning(f'[{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
+                self.Log.warning(f'[[bold cyan]{Humanize(Free)}[/]] [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
