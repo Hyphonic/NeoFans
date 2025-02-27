@@ -193,10 +193,17 @@ class Fetcher:
         SkippedCounter = 0
         Page = 0
         PageOffset = 50
+        QueueThreshold = self.DownloadQueue.maxsize * 0.8 # 80% Of Queue Size
         
         async def Fetch(Creator: CreatorData) -> None:
             nonlocal TotalCounter, NewCounter, SkippedCounter, Page
             while 'Hyphonical == Cool': # I'm always cool!
+                if self.DownloadQueue.qsize() >= QueueThreshold:
+                    self.Log.info(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+                    while self.DownloadQueue.qsize() > (QueueThreshold * 0.5): # 50% Of Queue Size
+                        await asyncio.sleep(1)
+                    self.Log.info(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+
                 try:
                     async with self.Session.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
