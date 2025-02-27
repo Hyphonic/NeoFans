@@ -8,6 +8,7 @@ import aiofiles
 import asyncio
 import aiohttp
 import json
+import os
 
 # Logging
 from rich.console import Console as RichConsole
@@ -105,7 +106,7 @@ class Fetcher:
                 {
                     'BaseUrl': 'https://coomer.su/api/v1',
                     'FileUrl': 'https://coomer.su',
-                    'Session': aiofiles.os.getenv('COOMER_SESS'),
+                    'Session': os.getenv('COOMER_SESS'),
                     'Services': ['onlyfans', 'fansly'],
                     'Creators': {
                         'onlyfans': [],
@@ -125,7 +126,7 @@ class Fetcher:
                 {
                     'BaseUrl': 'https://kemono.su/api/v1',
                     'FileUrl': 'https://kemono.su',
-                    'Session': aiofiles.os.getenv('KEMONO_SESS'),
+                    'Session': os.getenv('KEMONO_SESS'),
                     'Services': ['patreon', 'subscribestar', 'gumroad', 'fanbox'],
                     'Creators': {
                         'patreon': [],
