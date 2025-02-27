@@ -304,7 +304,11 @@ class Downloader:
         
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
+            self.Log.warning(
+                f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
+                f'[bold cyan]{File.Hash[:30]}...[/] '
+            ) if not self.Stopped else None
             return
 
         async with self.Semaphore:
@@ -329,8 +333,8 @@ class Downloader:
                             self.CompletedDownloads += 1
                             ElapsedTime = asyncio.get_event_loop().time() - StartTime
                             self.Log.info(
-                                f'([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                                f'[{self.CompletedDownloads}/{self.TotalFiles}] Downloaded '
+                                f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                                f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
                                 f'[bold cyan]{File.Hash[:30]}...[/] '
                                 f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
                             ) if not self.Stopped else None
@@ -343,8 +347,8 @@ class Downloader:
                 if not self.Stopped:
                     self.ErrorLogger(Error)
                     self.Log.warning(
-                        f'([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                        f'[{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download '
+                        f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                        f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
                         f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
                     )
 
