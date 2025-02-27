@@ -22,7 +22,7 @@ import logging
 
 # Config
 LowDiskSpaceThreshold = 5e+9 # 5GB
-SemaphoreLimit = 32
+SemaphoreLimit = 16
 QueueThresholds = [0.8, 0.5]
 PageOffset = 50
 StartingPage = 0
@@ -308,10 +308,10 @@ class Downloader:
             try:
                 self.ActiveDownloads.add(File.Hash[:30])
                 
-                if self.CompletedDownloads % 20 == 0:
+                if self.CompletedDownloads % 50 == 0:
                     Active = list(self.ActiveDownloads)
-                    Chunks = [Active[i:i+4] for i in range(0, len(Active), 4)]
-                    Status = '\n'.join('    '.join(Chunk) for Chunk in Chunks)
+                    Chunks = [Active[i:i+3] for i in range(0, len(Active), 3)]
+                    Status = '\n'.join('\t'.join(Chunk) for Chunk in Chunks)
                     
                     self.Log.info(
                         f'\n[bold magenta]Active Downloads ({len(self.ActiveDownloads)}):[/]\n'
