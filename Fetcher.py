@@ -240,6 +240,8 @@ class Downloader:
         self.ErrorLogger = ErrorLogger
         self.Session = Session
         self.Semaphore = asyncio.Semaphore(10)
+        self.CompletedDownloads = 0
+        self.TotalFiles = 0
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -253,7 +255,8 @@ class Downloader:
             raise Exception('LowDiskSpace')
         
         if str(File.Hash) in self.Hashes:
-            self.Log.info(f'Skipping [bold cyan]{File.Hash}[/]')
+            self.CompletedDownloads += 1
+            self.Log.info(f'[{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
             return
 
         async with self.Semaphore:
@@ -266,12 +269,13 @@ class Downloader:
                         async with aiofiles.open(OutPath / f'{File.Hash}{File.Extension}', 'wb') as F:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
-                            self.Log.info(f'Downloaded [bold cyan]{File.Hash}[/]')
+                            self.CompletedDownloads += 1
+                            self.Log.info(f'[{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash}[/]')
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except Exception as Error:
                 self.ErrorLogger(Error)
-                self.Log.warning(f'Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
+                self.Log.warning(f'[{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
 # JSON Encoder
 class Encoder(JSONEncoder):
     def default(self, obj):
@@ -302,6 +306,7 @@ if __name__ == '__main__':
             
             Fetch.Log.info(f'Fetched [bold cyan]{Fetch.TotalFiles}[/] Files')
 
+            Download.TotalFiles = Fetch.TotalFiles
             await aiofiles.os.makedirs('Data/Files', exist_ok=True)
             Tasks = []
             for Platform in Fetch.Data:
