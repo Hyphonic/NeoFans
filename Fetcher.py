@@ -9,6 +9,7 @@ import asyncio
 import aiohttp
 import shutil
 import json
+import sys
 import os
 
 # Logging
@@ -250,7 +251,6 @@ class Downloader:
         self.Semaphore = asyncio.Semaphore(10)
         self.CompletedDownloads = 0
         self.TotalFiles = 0
-        self.TaskID = 0
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -258,19 +258,16 @@ class Downloader:
             self.Hashes = set()
     
     async def Download(self, File: FileData) -> None:
-        TaskID = None 
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [#{TaskID}] [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
+            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash}[/]')
             return
 
         async with self.Semaphore:
-            self.TaskID += 1
-            TaskID = self.TaskID
             try:
-                if shutil.disk_usage('.').free < 5e+9:
+                if shutil.disk_usage('.').free < 23e+9:
                     self.Log.warning('Low Disk Space!')
-                    raise Exception('LowDiskSpace')
+                    sys.exit(0)
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                 await aiofiles.os.makedirs(OutPath, exist_ok=True)
                 
@@ -280,12 +277,12 @@ class Downloader:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
-                            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [#{TaskID}] [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]')
+                            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]')
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except Exception as Error:
                 self.ErrorLogger(Error)
-                self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [#{TaskID}] [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash[:30]}...[/] ({Response.status})')
+                self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash[:30]}...[/] ({Response.status})')
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -340,8 +337,5 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
-    except Exception('LowDiskSpace'):
-        Log.warning('Exiting Due To Low Disk Space...')
-        exit(0)
     except Exception as Error:
         ErrorLogger(Error)
