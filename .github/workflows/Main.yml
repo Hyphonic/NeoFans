@@ -54,13 +54,11 @@ jobs:
           KEMONO_SESS: ${{ secrets.KEMONO_SESS }}
           COOMER_SESS: ${{ secrets.COOMER_SESS }}
         run: |
-          python Main.py
+          python Fetcher.py
       
       - name: 📃 List Files
         run: |
-          ls -lh
-          tree -L 2 -CF
-          cat cached_hashes.json
+          cat Data/*.json
 
       - name: 🔼 Commit updated hashes
         if: success()
@@ -68,8 +66,8 @@ jobs:
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git pull
-          git add cached_hashes.json
-          git commit -m "Update cached hashes"
+          git add Data/*.json
+          git commit -m "Update Cached Hashes"
           git push
 
       - name: 🔁 Trigger Next Workflow
@@ -82,5 +80,5 @@ jobs:
       - name: 🌐 Upload Data with Rclone
         run: |
           echo "🟢 Uploading Data to Pixeldrain..."
-          rclone copy . Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
+          rclone copy Data/Files/* Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
           echo "🟢 Upload complete."
