@@ -223,6 +223,8 @@ class Fetcher:
                                             Extension=FilePath.suffix
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                        if self.DownloadQueue.full():
+                                            self.Log.info(f'Download queue full, waiting... ({self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize})')
                                         await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
                                         self.TotalFiles += 1
@@ -288,16 +290,26 @@ class Downloader:
                     self.Log.warning('Low Disk Space!') if not self.Stopped else None
                     self.Stopped = True
                     raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
+            
+                StartTime = asyncio.get_event_loop().time()
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                 await aiofiles.os.makedirs(OutPath, exist_ok=True)
                 
                 async with self.Session.get(File.Url) as Response:
                     if Response.status == 200:
+                        Content = await Response.read()
+                        FileSize = len(Content)
                         async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
-                            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
+                            ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                            self.Log.info(
+                                f'([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                                f'[{self.CompletedDownloads}/{self.TotalFiles}] Downloaded '
+                                f'[bold cyan]{File.Hash[:30]}...[/] '
+                                f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
+                            ) if not self.Stopped else None
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except LowDiskSpace as Error:
@@ -306,7 +318,11 @@ class Downloader:
             except Exception as Error:
                 if not self.Stopped:
                     self.ErrorLogger(Error)
-                    self.Log.warning(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash[:30]}...[/] ({Response.status})')
+                    self.Log.warning(
+                        f'([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                        f'[{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download '
+                        f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
+                    )
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -327,7 +343,7 @@ class Encoder(JSONEncoder):
 
 if __name__ == '__main__':
     async def Main() -> None:
-        DownloadQueue = Queue()
+        DownloadQueue = Queue(maxsize=100)
 
         async def ProcessDownloads(Download: Downloader):
             while True:
