@@ -241,8 +241,12 @@ class Fetcher:
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
                                         if self.DownloadQueue.full():
-                                            self.Log.info(f'Download queue full, waiting... ({self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize})')
-                                        await self.DownloadQueue.put(FileInfo)
+                                            self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize})')
+                                            while self.DownloadQueue.full():
+                                                await asyncio.sleep(1)
+                                            await self.DownloadQueue.put(FileInfo)
+                                        else:
+                                            await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
                                         self.TotalFiles += 1
                                     else:
