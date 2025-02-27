@@ -292,8 +292,6 @@ class Downloader:
         self.TotalFiles = 0
         self.Stopped = False
         self.Fetcher = Fetcher
-        self.ActiveDownloads = set()
-        self.LastStatusCheck = 0
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
@@ -306,18 +304,6 @@ class Downloader:
         
         async with self.Semaphore:
             try:
-                self.ActiveDownloads.add(File.Hash[:30])
-                
-                if self.CompletedDownloads % 50 == 0:
-                    Active = list(self.ActiveDownloads)
-                    Chunks = [Active[i:i+3] for i in range(0, len(Active), 3)]
-                    Status = '\n'.join('\t'.join(Chunk) for Chunk in Chunks)
-                    
-                    self.Log.info(
-                        f'\n[bold magenta]Active Downloads ({len(self.ActiveDownloads)}):[/]\n'
-                        f'[bold cyan]{Status}[/]'
-                    )
-
                 if str(File.Hash) in self.Hashes:
                     self.CompletedDownloads += 1
                     self.Log.warning(
@@ -366,8 +352,8 @@ class Downloader:
                             f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
                             f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
                         )
-            finally:
-                self.ActiveDownloads.discard(File.Hash[:30])
+            except LowDiskSpace as Error:
+                raise Error
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
