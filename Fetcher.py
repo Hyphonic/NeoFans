@@ -349,9 +349,11 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
+        sys.exit(0)
     except LowDiskSpace as Error:
         Log.warning(Error)
         sys.exit(0)
     except Exception as Error:
         if not isinstance(Error, asyncio.CancelledError):
             ErrorLogger(Error)
+        sys.exit(1)
