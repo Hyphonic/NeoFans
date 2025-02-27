@@ -95,6 +95,9 @@ class CreatorData:
     Platform: str
     Service: str
 
+class LowDiskSpace(Exception):
+    pass
+
 # Fetcher Class
 class Fetcher:
     def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger) -> None:
@@ -267,7 +270,7 @@ class Downloader:
             try:
                 if shutil.disk_usage('.').free < 24e+9:
                     self.Log.warning('Low Disk Space!')
-                    sys.exit(0)
+                    raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
                 OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                 await aiofiles.os.makedirs(OutPath, exist_ok=True)
                 
@@ -337,5 +340,8 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
+    except LowDiskSpace as Error:
+        Log.warning(Error)
+        sys.exit(0)
     except Exception as Error:
         ErrorLogger(Error)
