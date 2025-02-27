@@ -107,6 +107,11 @@ class Fetcher:
         self.CreatorLimit = 10
         self.PostLimit = 1000
         self.TotalFiles = 0
+        try:
+            with open('Data/Hashes.json', 'r') as Hashes:
+                self.Hashes = set(json.load(Hashes))
+        except FileNotFoundError:
+            self.Hashes = set()
         self.Data = {
             'coomer':
                 {
@@ -193,57 +198,71 @@ class Fetcher:
     async def Posts(self, Creator: CreatorData) -> None:
         self.Log.info(f'Fetching Posts From {Creator.Name}... ({Creator.ID})/{Creator.Service}')
         Counter = 0
+        Page = 0
+        ValidCounter = 0
+        PageOffset = 50
         
         async def Fetch(Creator: CreatorData) -> None:
-            nonlocal Counter
-            try:
-                async with self.Session.get(
-                    f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
-                    cookies={'session': self.Data[Creator.Platform]['Session']}
-                ) as Response:
-                    if Response.status == 200:
-                        Posts = await Response.json()
-                        for Post in Posts[:self.PostLimit]:
-                            if Counter >= self.PostLimit:
+            nonlocal Counter, Page, ValidCounter
+            while ValidCounter < self.PostLimit:
+                try:
+                    async with self.Session.get(
+                        f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
+                        cookies={'session': self.Data[Creator.Platform]['Session']},
+                        params={'o': Page * PageOffset}
+                    ) as Response:
+                        if Response.status == 200:
+                            Posts = await Response.json()
+                            if not Posts:
+                                self.Log.warning(f'No More Posts From {Creator.Name}')
                                 break
-
-                            if Post.get('file') and Post['file'].get('path'):
-                                FilePath = Path(Post['file']['path'])
-                                FileInfo = FileData(
-                                    ID=Creator.ID,
-                                    Name=Creator.Name,
-                                    Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
-                                    Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
-                                    Hash=FilePath.stem,
-                                    Extension=FilePath.suffix
-                                )
-                                self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                Counter += 1
-                                self.TotalFiles += 1
-                            
-                            for Attachment in Post.get('attachments', []):
-                                if Counter >= self.PostLimit:
+                            for Post in Posts[:self.PostLimit]:
+                                if ValidCounter >= self.PostLimit:
                                     break
 
-                                if Attachment.get('path'):
-                                    FilePath = Path(Attachment['path'])
-                                    FileInfo = FileData(
-                                        ID=Creator.ID,
-                                        Name=Creator.Name,
-                                        Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
-                                        Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
-                                        Hash=FilePath.stem,
-                                        Extension=FilePath.suffix
-                                    )
-                                    self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                    Counter += 1
-                                    self.TotalFiles += 1
-            except Exception as Error:
-                self.ErrorLogger(Error)
-                self.Log.warning(f'Failed To Fetch Posts From {Creator.Name}')
+                                if Post.get('file') and Post['file'].get('path'):
+                                    FilePath = Path(Post['file']['path'])
+                                    if str(FilePath.stem) not in self.Hashes:
+                                        FileInfo = FileData(
+                                            ID=Creator.ID,
+                                            Name=Creator.Name,
+                                            Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
+                                            Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
+                                            Hash=FilePath.stem,
+                                            Extension=FilePath.suffix
+                                        )
+                                        self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                        ValidCounter += 1
+                                        self.TotalFiles += 1
+                                Counter += 1
+                                
+                                for Attachment in Post.get('attachments', []):
+                                    if ValidCounter >= self.PostLimit:
+                                        break
+
+                                    if Attachment.get('path'):
+                                        FilePath = Path(Attachment['path'])
+                                        if str(FilePath.stem) not in self.Hashes:
+                                            FileInfo = FileData(
+                                                ID=Creator.ID,
+                                                Name=Creator.Name,
+                                                Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
+                                                Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
+                                                Hash=FilePath.stem,
+                                                Extension=FilePath.suffix
+                                            )
+                                            self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                            ValidCounter += 1
+                                            self.TotalFiles += 1
+                                Counter += 1
+                            Page += 1
+                except Exception as Error:
+                    self.ErrorLogger(Error)
+                    self.Log.warning(f'Failed To Fetch Posts From {Creator.Name} ({Response.status})')
+                    break
         
         await Fetch(Creator)
-        self.Log.info(f'Fetched {Counter} Posts From {Creator.Name}')
+        self.Log.info(f'Fetched {ValidCounter} New Posts From {Creator.Name} (Skipped {Counter - ValidCounter} Existing)')
 
 # Downloader Class
 class Downloader:
@@ -267,7 +286,7 @@ class Downloader:
         
         if str(File.Hash) in self.Hashes:
             self.CompletedDownloads += 1
-            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]')
+            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Skipping [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
             return
 
         async with self.Semaphore:
@@ -285,7 +304,7 @@ class Downloader:
                             await F.write(await Response.read())
                             self.Hashes.add(str(File.Hash))
                             self.CompletedDownloads += 1
-                            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]')
+                            self.Log.info(f'([bold cyan]{await Humanize(shutil.disk_usage('.').free)}[/]) [{self.CompletedDownloads}/{self.TotalFiles}] Downloaded [bold cyan]{File.Hash[:30]}...[/]') if not self.Stopped else None
                             async with aiofiles.open('Data/Hashes.json', 'w') as f:
                                 await f.write(json.dumps(list(self.Hashes)))
             except LowDiskSpace as Error:
