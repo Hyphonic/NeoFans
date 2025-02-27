@@ -306,51 +306,50 @@ class Downloader:
             self.CompletedDownloads += 1
             self.Log.warning(
                 f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
+                f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
                 f'[bold cyan]{File.Hash[:30]}...[/] '
             ) if not self.Stopped else None
             return
 
-        async with self.Semaphore:
-            try:
-                if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
-                    self.Log.warning('Low Disk Space!') if not self.Stopped else None
-                    self.Stopped = True
-                    self.Fetcher.Stopped = True
-                    raise LowDiskSpace(f'Available Disk Space Below {await Humanize(await Humanize(shutil.disk_usage(".").free))}')
+        try:
+            if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
+                self.Log.warning('Low Disk Space!') if not self.Stopped else None
+                self.Stopped = True
+                self.Fetcher.Stopped = True
+                raise LowDiskSpace(f'Available Disk Space Below {await Humanize(shutil.disk_usage(".").free)}')
+        
+            StartTime = asyncio.get_event_loop().time()
+            OutPath = Path('Data/Files') / File.Path.relative_to('Data')
+            await aiofiles.os.makedirs(OutPath, exist_ok=True)
             
-                StartTime = asyncio.get_event_loop().time()
-                OutPath = Path('Data/Files') / File.Path.relative_to('Data')
-                await aiofiles.os.makedirs(OutPath, exist_ok=True)
-                
-                async with self.Session.get(File.Url) as Response:
-                    if Response.status == 200:
-                        Content = await Response.read()
-                        FileSize = len(Content)
-                        async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
-                            await F.write(Content)
-                            self.Hashes.add(str(File.Hash))
-                            self.CompletedDownloads += 1
-                            ElapsedTime = asyncio.get_event_loop().time() - StartTime
-                            self.Log.info(
-                                f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                                f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
-                                f'[bold cyan]{File.Hash[:30]}...[/] '
-                                f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
-                            ) if not self.Stopped else None
-                            async with aiofiles.open('Data/Hashes.json', 'w') as f:
-                                await f.write(json.dumps(list(self.Hashes)))
-            except LowDiskSpace as Error:
-                raise Error
-            
-            except Exception as Error:
-                if not self.Stopped:
-                    self.ErrorLogger(Error)
-                    self.Log.warning(
-                        f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                        f'[{self.Fetcher.DownloadQueue.qsize}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
-                        f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
-                    )
+            async with self.Session.get(File.Url) as Response:
+                if Response.status == 200:
+                    Content = await Response.read()
+                    FileSize = len(Content)
+                    async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
+                        await F.write(Content)
+                        self.Hashes.add(str(File.Hash))
+                        self.CompletedDownloads += 1
+                        ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                        self.Log.info(
+                            f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
+                            f'[bold cyan]{File.Hash[:30]}...[/] '
+                            f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
+                        ) if not self.Stopped else None
+                        async with aiofiles.open('Data/Hashes.json', 'w') as f:
+                            await f.write(json.dumps(list(self.Hashes)))
+        except LowDiskSpace as Error:
+            raise Error
+        
+        except Exception as Error:
+            if not self.Stopped:
+                self.ErrorLogger(Error)
+                self.Log.warning(
+                    f'[{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                    f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
+                    f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
+                )
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -374,21 +373,36 @@ if __name__ == '__main__':
         DownloadQueue = Queue(maxsize=100)
 
         async def ProcessDownloads(Download: Downloader):
+            Tasks = set()
             while True:
                 File = await DownloadQueue.get()
-                await Download.Download(File)
+                if len(Tasks) >= SemaphoreLimit:
+                    Done, Tasks = await asyncio.wait(Tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for Task in Done:
+                        try:
+                            await Task
+                        except Exception as Error:
+                            ErrorLogger(Error)
+                
+                Task = asyncio.create_task(Download.Download(File))
+                Tasks.add(Task)
+                Task.add_done_callback(Tasks.discard)
                 DownloadQueue.task_done()
+
+            if Tasks:
+                await asyncio.wait(Tasks)
 
         async with aiohttp.ClientSession() as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
-            # Start download processor
-            DownloadTask = asyncio.create_task(ProcessDownloads(Download))
+            DownloadTasks = [
+                asyncio.create_task(ProcessDownloads(Download))
+                for _ in range(SemaphoreLimit)
+            ]
             
             await Fetch.Favorites()
             
-            # Process creators
             for Platform in Fetch.Data:
                 for Service in Fetch.Data[Platform]['Creators']:
                     for Creator in Fetch.Data[Platform]['Creators'][Service]:
@@ -397,11 +411,10 @@ if __name__ == '__main__':
             Fetch.Log.info(f'Fetched [bold cyan]{Fetch.TotalFiles}[/] Files')
             Download.TotalFiles = Fetch.TotalFiles
             
-            # Wait for all downloads to complete
             await DownloadQueue.join()
-            DownloadTask.cancel()
+            for Task in DownloadTasks:
+                Task.cancel()
             
-            # Save final data
             await aiofiles.os.makedirs('Data', exist_ok=True)
             async with aiofiles.open('Data/Data.json', 'w', encoding='utf-8') as File:
                 await File.write(json.dumps(
@@ -410,6 +423,8 @@ if __name__ == '__main__':
                     ensure_ascii=False,
                     cls=Encoder
                 ))
+            
+            await asyncio.gather(*DownloadTasks, return_exceptions=True)
 
     try:
         asyncio.run(Main())
