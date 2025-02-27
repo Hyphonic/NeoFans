@@ -25,7 +25,7 @@ Console = RichConsole(theme=Theme({
     'logging.level.error': 'red'
 }),
     force_terminal=True,
-    width=100,
+    width=150,
     log_path=False
 )
 
@@ -276,6 +276,7 @@ class Downloader:
             except Exception as Error:
                 self.ErrorLogger(Error)
                 self.Log.warning(f'[{self.CompletedDownloads}/{self.TotalFiles}] Failed To Download [bold cyan]{File.Hash}[/] ({Response.status})')
+
 # JSON Encoder
 class Encoder(JSONEncoder):
     def default(self, obj):
