@@ -306,13 +306,16 @@ class Downloader:
         
         async with self.Semaphore:
             try:
-                self.ActiveDownloads.add(File.Hash[:10])
+                self.ActiveDownloads.add(File.Hash[:30])
                 
-                if self.CompletedDownloads - self.LastStatusCheck >= 20:
-                    self.LastStatusCheck = self.CompletedDownloads
+                if self.CompletedDownloads % 20 == 0:
+                    Active = list(self.ActiveDownloads)
+                    Chunks = [Active[i:i+4] for i in range(0, len(Active), 4)]
+                    Status = '\n'.join('    '.join(Chunk) for Chunk in Chunks)
+                    
                     self.Log.info(
                         f'\n[bold magenta]Active Downloads ({len(self.ActiveDownloads)}):[/]\n'
-                        f'[bold cyan]{" | ".join(self.ActiveDownloads)}[/]'
+                        f'[bold cyan]{Status}[/]'
                     )
 
                 if str(File.Hash) in self.Hashes:
@@ -364,7 +367,7 @@ class Downloader:
                             f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
                         )
             finally:
-                self.ActiveDownloads.discard(File.Hash[:10])
+                self.ActiveDownloads.discard(File.Hash[:30])
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -395,13 +398,16 @@ if __name__ == '__main__':
                 except Exception as Error:
                     ErrorLogger(Error)
                 finally:
-                    DownloadQueue.task_done()
+                    DownloadQueue.Task_done()
 
         async with aiohttp.ClientSession() as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
-            DownloadTask= asyncio.create_task(ProcessDownloads(Download))
+            DownloadTasks = [
+                asyncio.create_Task(ProcessDownloads(Download))
+                for _ in range(SemaphoreLimit)
+            ]
             
             await Fetch.Favorites()
             
@@ -414,8 +420,9 @@ if __name__ == '__main__':
             Download.TotalFiles = Fetch.TotalFiles
             
             await DownloadQueue.join()
-            DownloadTask.cancel()
-            await asyncio.gather(DownloadTask, return_exceptions=True)
+            for Task in DownloadTasks:
+                Task.cancel()
+            await asyncio.gather(*DownloadTasks, return_exceptions=True)
             
             await aiofiles.os.makedirs('Data', exist_ok=True)
             async with aiofiles.open('Data/Data.json', 'w', encoding='utf-8') as File:
