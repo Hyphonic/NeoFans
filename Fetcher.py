@@ -398,14 +398,14 @@ if __name__ == '__main__':
                 except Exception as Error:
                     ErrorLogger(Error)
                 finally:
-                    DownloadQueue.Task_done()
+                    DownloadQueue.task_done()
 
         async with aiohttp.ClientSession() as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
             DownloadTasks = [
-                asyncio.create_Task(ProcessDownloads(Download))
+                asyncio.create_task(ProcessDownloads(Download))
                 for _ in range(SemaphoreLimit)
             ]
             
