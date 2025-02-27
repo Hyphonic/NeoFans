@@ -94,8 +94,6 @@ class Fetcher:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
-        self.CreatorLimit = 10
-        self.PostLimit = 1000
         self.TotalFiles = 0
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
@@ -151,7 +149,6 @@ class Fetcher:
             }
 
     async def Favorites(self) -> None:
-        self.Log.info(f'Creator Limit: {self.CreatorLimit} | Post Limit: {self.PostLimit}')
         self.Log.info('Fetching Favorites...')
         Counter = 0
         Tasks = []
@@ -165,7 +162,7 @@ class Fetcher:
                 ) as Response:
                     if Response.status == 200:
                         Creators = await Response.json()
-                        for Creator in Creators[:self.CreatorLimit]:
+                        for Creator in Creators:  # Removed slice
                             self.Data[Platform]['Creators'][Creator['service']].append(
                                 CreatorData(
                                     ID=Creator['id'],
@@ -187,14 +184,15 @@ class Fetcher:
     
     async def Posts(self, Creator: CreatorData) -> None:
         self.Log.info(f'Fetching Posts From {Creator.Name}... ({Creator.ID})/{Creator.Service}')
-        Counter = 0
+        TotalCounter = 0
+        NewCounter = 0
+        SkippedCounter = 0
         Page = 0
-        ValidCounter = 0
         PageOffset = 50
         
         async def Fetch(Creator: CreatorData) -> None:
-            nonlocal Counter, Page, ValidCounter
-            while ValidCounter < self.PostLimit:
+            nonlocal TotalCounter, NewCounter, SkippedCounter, Page
+            while 'Hyphonical == Cool': # I'm always cool!
                 try:
                     async with self.Session.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
@@ -204,14 +202,13 @@ class Fetcher:
                         if Response.status == 200:
                             Posts = await Response.json()
                             if not Posts:
-                                self.Log.warning(f'No More Posts From {Creator.Name}')
                                 break
-                            for Post in Posts[:self.PostLimit]:
-                                if ValidCounter >= self.PostLimit:
-                                    break
 
+                            for Post in Posts:
                                 if Post.get('file') and Post['file'].get('path'):
                                     FilePath = Path(Post['file']['path'])
+                                    TotalCounter += 1
+                                    
                                     if str(FilePath.stem) not in self.Hashes:
                                         FileInfo = FileData(
                                             ID=Creator.ID,
@@ -222,16 +219,16 @@ class Fetcher:
                                             Extension=FilePath.suffix
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                        ValidCounter += 1
+                                        NewCounter += 1
                                         self.TotalFiles += 1
-                                Counter += 1
+                                    else:
+                                        SkippedCounter += 1
                                 
                                 for Attachment in Post.get('attachments', []):
-                                    if ValidCounter >= self.PostLimit:
-                                        break
-
                                     if Attachment.get('path'):
                                         FilePath = Path(Attachment['path'])
+                                        TotalCounter += 1
+                                        
                                         if str(FilePath.stem) not in self.Hashes:
                                             FileInfo = FileData(
                                                 ID=Creator.ID,
@@ -242,17 +239,18 @@ class Fetcher:
                                                 Extension=FilePath.suffix
                                             )
                                             self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                            ValidCounter += 1
+                                            NewCounter += 1
                                             self.TotalFiles += 1
-                                Counter += 1
+                                        else:
+                                            SkippedCounter += 1
                             Page += 1
                 except Exception as Error:
                     self.ErrorLogger(Error)
-                    self.Log.warning(f'Failed To Fetch Posts From {Creator.Name} ({Response.status})')
+                    self.Log.warning(f'Failed To Fetch Posts From {Creator.Name}')
                     break
         
         await Fetch(Creator)
-        self.Log.info(f'Fetched {ValidCounter} New Posts From {Creator.Name} (Skipped {Counter - ValidCounter} Existing)')
+        self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} (Total: {TotalCounter}, Skipped: {SkippedCounter})')
 
 # Downloader Class
 class Downloader:
