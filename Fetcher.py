@@ -239,7 +239,7 @@ class Downloader:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
-        self.Semaphore = asyncio.Semaphore(5)
+        self.Semaphore = asyncio.Semaphore(10)
         try:
             with open('Data/Hashes.json', 'r') as Hashes:
                 self.Hashes = set(json.load(Hashes))
