@@ -96,7 +96,7 @@ class CreatorData:
 class LowDiskSpace(Exception):
     pass
 
-Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
+Log.info(f'{QueueThresholds[1] * 100}% <-- Queue --> {QueueThresholds[0] * 100}%')
 
 # Fetcher Class
 class Fetcher:
@@ -307,7 +307,7 @@ class Downloader:
                 self.CompletedDownloads += 1
                 self.Log.warning(
                     f'[{self.CompletedDownloads}/{self.TotalFiles}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                    f'[{self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}] Skipping '
+                    f'[{self.Fetcher.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}] Skipping '
                     f'[bold cyan]{File.Hash[:30]}...[/] '
                 ) if not self.Stopped else None
                 return
