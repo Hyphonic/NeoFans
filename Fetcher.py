@@ -28,7 +28,7 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = 8e+9
+LowDiskSpaceThreshold = shutil.disk_usage('.').free * 0.1
 SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
@@ -458,6 +458,7 @@ class Encoder(JSONEncoder):
 
 if __name__ == '__main__':
     async def Main() -> None:
+        Log.info(f'[bold]Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}[/]')
         DownloadQueue = Queue(maxsize=100)
 
         async def ProcessDownloads(Download: Downloader):
