@@ -496,7 +496,8 @@ if __name__ == '__main__':
             Log.info('Starting Move Task')
             while True:
                 try:
-                    rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
+                    pass
+                    #rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
                 except RcloneException as Error:
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
