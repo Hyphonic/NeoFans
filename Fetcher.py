@@ -26,8 +26,8 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = 5e+9 # 5GB
-SemaphoreLimit = 16
+LowDiskSpaceThreshold = 10e+9
+SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
@@ -349,8 +349,8 @@ class Downloader:
         if self.Stopped:
             return
         
-        if self.CompletedDownloads % 50 == 0:
-            self.Log.info(psutil.virtual_memory().available)
+        if self.CompletedDownloads % 10 == 0:
+            self.Log.info(f'{Humanize(psutil.virtual_memory().available)} Available Memory')
             gc.collect()
         
         async with self.Semaphore:
