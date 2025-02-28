@@ -47,30 +47,42 @@ TimeoutConfig = aiohttp.ClientTimeout(
 # Logging Configuration
 class DownloadHighlighter(RegexHighlighter):
     base_highlights = [
-        r'(?P<yellow>#\d+)',  # Download counter
-        r'(?P<cyan>[\d.]+ [KMGT]?B)',  # File sizes and disk space
-        r'(?P<magenta>\d+/\d+)',  # Queue status
-        r'(?P<cyan>[a-f0-9]{30})',  # File hashes
-        r'(?P<green>Downloaded|Skipping)',  # Status words
-        r'(?P<yellow>[\d.]+s)',  # Time values
-        r'\[(?P<red>error|Error)\]',  # Error messages
-        r'\[(?P<yellow>warning|Warning)\]',  # Warning messages
-        r'\[(?P<green>info|Info)\]'  # Info messages
+        r'(?P<counter>#\d+)',                     # Download counter
+        r'(?P<size>[\d.]+ [KMGT]?B)',             # File sizes and disk space
+        r'(?P<queue>\d+/\d+)',                    # Queue status
+        r'(?P<hash>[a-f0-9]{30})',                # File hashes
+        r'(?P<status>Downloaded|Skipping)',       # Status words
+        r'(?P<time>[\d.]+s)',                     # Time values
+        r'\[(?P<error>error|Error)\]',            # Error messages
+        r'\[(?P<warning>warning|Warning)\]',      # Warning messages
+        r'\[(?P<info>info|Info)\]'                # Info messages
     ]
 
+CustomTheme = Theme({
+    'log.time': 'bright_black',
+    'logging.level.info': 'bright_green',
+    'logging.level.warning': 'bright_yellow',
+    'logging.level.error': 'bright_red',
+    # Highlighter colors
+    'counter': 'bright_yellow',     # Make download numbers yellow
+    'size': 'bright_cyan',          # File sizes in cyan
+    'queue': 'bright_magenta',      # Queue numbers in magenta
+    'hash': 'bright_blue',          # File hashes in blue
+    'status': 'bright_green',       # Status words in green
+    'time': 'bright_yellow',        # Times in yellow
+    'error': 'bright_red',          # Error tags in red
+    'warning': 'bright_yellow',     # Warning tags in yellow
+    'info': 'bright_green'          # Info tags in green
+})
+
 Console = RichConsole(
-    theme=Theme({
-        'log.time': 'bright_black',
-        'logging.level.info': 'green',
-        'logging.level.warning': 'yellow',
-        'logging.level.error': 'red'
-    }),
+    theme=CustomTheme,
     force_terminal=True,
     width=120,
     log_path=False,
-    highlighter=DownloadHighlighter()
+    highlighter=DownloadHighlighter(),
+    color_system='truecolor'
 )
-
 # Single handler configuration
 ConsoleHandler = RichHandler(
     markup=True,
