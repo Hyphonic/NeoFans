@@ -13,6 +13,7 @@ import asyncio
 import aiohttp
 import shutil
 import psutil
+import random
 import json
 import sys
 import os
@@ -27,7 +28,7 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = 10e+9
+LowDiskSpaceThreshold = 8e+9
 SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
@@ -468,10 +469,15 @@ if __name__ == '__main__':
             
             await Fetch.Favorites()
             
+            AllCreators = []
             for Platform in Fetch.Data:
                 for Service in Fetch.Data[Platform]['Creators']:
-                    for Creator in Fetch.Data[Platform]['Creators'][Service]:
-                        await Fetch.Posts(Creator)
+                    AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
+            
+            random.shuffle(AllCreators)
+
+            for Creator in AllCreators:
+                await Fetch.Posts(Creator)
             
             Fetch.Log.info(f'Fetched [bold cyan]{Fetch.TotalFiles}[/] Files')
             Download.TotalFiles = Fetch.TotalFiles
