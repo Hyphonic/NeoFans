@@ -8,6 +8,8 @@ on:
 
 jobs:
   download-content:
+    strategy:
+      fail-fast: false
     name: 🌐 Download Content
     runs-on: ubuntu-latest
     steps:
