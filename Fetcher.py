@@ -11,6 +11,7 @@ import aiofiles
 import asyncio
 import aiohttp
 import shutil
+import psutil
 import json
 import sys
 import os
@@ -349,6 +350,7 @@ class Downloader:
             return
         
         if self.CompletedDownloads % 50 == 0:
+            self.Log.info(psutil.virtual_memory().available))
             gc.collect()
         
         async with self.Semaphore:
