@@ -1,4 +1,6 @@
 # Main Imports
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type
+from tenacity.before_sleep import before_sleep_log
 from dataclasses import dataclass
 from typing import Union, Tuple
 from json import JSONEncoder
@@ -16,6 +18,7 @@ import os
 # Logging
 from rich.console import Console as RichConsole
 from rich.traceback import install as Install
+from rich.highlighter import RegexHighlighter
 from rich.logging import RichHandler
 from rich.theme import Theme
 import logging
@@ -28,6 +31,16 @@ PageOffset = 50
 StartingPage = 0
 
 # Logging Configuration
+class DownloadHighlighter(RegexHighlighter):
+    base_highlights = [
+        r'(?P<yellow>#\d+)',  # Download counter
+        r'(?P<cyan>[\d.]+ [KMGT]?B)',  # File sizes and disk space
+        r'(?P<magenta>\d+/\d+)',  # Queue status
+        r'(?P<cyan>[a-f0-9]{30})',  # File hashes
+        r'(?P<green>Downloaded|Skipping)',  # Status words
+        r'(?P<yellow>[\d.]+s)',  # Time values
+    ]
+
 Console = RichConsole(
     theme=Theme({
         'log.time': 'bright_black',
@@ -37,7 +50,8 @@ Console = RichConsole(
     }),
     force_terminal=True,
     width=120,
-    log_path=False
+    log_path=False,
+    highlighter=DownloadHighlighter()
 )
 
 # Single handler configuration
@@ -76,6 +90,18 @@ def ErrorLogger(Error: Exception) -> None:
     )
 
 Install(show_locals=True)
+
+RetryConfig = dict(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    before_sleep=before_sleep_log(Log, logging.WARNING),
+    retry_error_cls=RetryError,
+    retry=(
+        retry_if_exception_type(aiohttp.ClientError) |
+        retry_if_exception_type(aiohttp.ServerTimeoutError) |
+        retry_if_exception_type(asyncio.TimeoutError)
+    )
+)
 
 @dataclass
 class FileData:
@@ -167,6 +193,7 @@ class Fetcher:
         Counter = 0
         Tasks = []
         
+        @retry(**RetryConfig)
         async def Fetch(Platform: str, BaseUrl: str) -> None:
             nonlocal Counter
             try:
@@ -207,6 +234,7 @@ class Fetcher:
         if self.Stopped:
             return
         
+        @retry(**RetryConfig)
         async def Fetch(Creator: CreatorData) -> None:
             nonlocal TotalCounter, NewCounter, SkippedCounter, Page
             while not self.Stopped:
@@ -298,6 +326,14 @@ class Downloader:
         except FileNotFoundError:
             self.Hashes = set()
     
+    @retry(**RetryConfig)
+    async def FetchFile(self, Url: str) -> tuple[bytes, int]:
+        async with self.Session.get(Url) as Response:
+            if Response.status != 200:
+                raise aiohttp.ClientError(f'Status: {Response.status}')
+            Content = await Response.read()
+            return Content, len(Content)
+    
     async def Download(self, File: FileData) -> None:
         if self.Stopped:
             return
@@ -307,9 +343,9 @@ class Downloader:
                 if str(File.Hash) in self.Hashes:
                     self.CompletedDownloads += 1
                     self.Log.warning(
-                        f'[[yellow]{self.CompletedDownloads}/{self.TotalFiles}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                        f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Skipping '
-                        f'[bold cyan]{File.Hash[:30]}...[/] '
+                        f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
+                        f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
+                        f'{File.Hash[:30]}... '
                     ) if not self.Stopped else None
                     return
 
@@ -324,33 +360,35 @@ class Downloader:
                     OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                     await aiofiles.os.makedirs(OutPath, exist_ok=True)
                     
-                    async with self.Session.get(File.Url) as Response:
-                        if Response.status == 200:
-                            Content = await Response.read()
-                            FileSize = len(Content)
-                            async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
-                                await F.write(Content)
-                                self.Hashes.add(str(File.Hash))
-                                self.CompletedDownloads += 1
-                                ElapsedTime = asyncio.get_event_loop().time() - StartTime
-                                self.Log.info(
-                                    f'[[yellow]{self.CompletedDownloads}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                                    f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Downloaded '
-                                    f'[bold cyan]{File.Hash[:30]}...[/] '
-                                    f'([bold green]{await Humanize(FileSize)}[/] in [bold yellow]{ElapsedTime:.1f}s[/])'
-                                ) if not self.Stopped else None
-                                async with aiofiles.open('Data/Hashes.json', 'w') as f:
-                                    await f.write(json.dumps(list(self.Hashes)))
+                    Content, FileSize = await self.FetchFile(File.Url)
+                    async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
+                        await F.write(Content)
+                        self.Hashes.add(str(File.Hash))
+                        self.CompletedDownloads += 1
+                        ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                        self.Log.info(
+                            f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
+                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
+                            f'{File.Hash[:30]}... '
+                            f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
+                        ) if not self.Stopped else None
+                        async with aiofiles.open('Data/Hashes.json', 'w') as f:
+                            await f.write(json.dumps(list(self.Hashes)))
                 except LowDiskSpace as Error:
                     raise Error
-                
+                except RetryError as Error:
+                    if not self.Stopped:
+                        self.ErrorLogger(Error)
+                        self.Log.warning(
+                            f'[#{self.CompletedDownloads}] Retry limit exceeded for {File.Hash[:30]}...'
+                        )
                 except Exception as Error:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
                         self.Log.warning(
-                            f'[[yellow]{self.CompletedDownloads}[/]] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
+                            f'[#{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
                             f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Failed To Download '
-                            f'[bold cyan]{File.Hash[:30]}...[/] ({Response.status})'
+                            f'[bold cyan]{File.Hash[:30]}...[/]'
                         )
             except LowDiskSpace as Error:
                 raise Error
