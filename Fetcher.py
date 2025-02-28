@@ -501,23 +501,32 @@ class Encoder(JSONEncoder):
 if __name__ == '__main__':
     async def Main() -> None:
         async def MoveToRemote():
-            asyncio.sleep(5)
-            Log.info('Starting Move Task')
+            Log.info('Starting Background Move Task')
+            LastMove = asyncio.get_event_loop().time()
+
             while True:
                 try:
-                    Log.info('Moving Files To Remote Storage...')
-                    rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False)
-                    await asyncio.sleep(60)
+                    if Path(FinalDir).exists():
+                        FileCount = len(list(Path(FinalDir).rglob('*')))
+                        TimeSinceLastMove = asyncio.get_event_loop().time() - LastMove
+                        
+                        if FileCount >= 10 or TimeSinceLastMove >= 60:
+                            DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
+                            if DirSize > 0:
+                                Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
+                                rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False)
+                                LastMove = asyncio.get_event_loop().time()
+                    await asyncio.sleep(10)
                 except RcloneException as Error:
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
                     await asyncio.sleep(300)
                 except FileNotFoundError:
-                    Log.warning('Files Not Found')
+                    await asyncio.sleep(10)
                 except Exception as Error:
                     ErrorLogger(Error)
                     Log.error('Unexpected Error In Move Task')
-                    break
+                    await asyncio.sleep(30)
                 
         Log.info(f'[bold]Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}[/]')
         DownloadQueue = Queue(maxsize=100)
