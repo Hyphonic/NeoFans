@@ -428,7 +428,8 @@ class Downloader:
                     StartTime = asyncio.get_event_loop().time()
                     TempPath = TempDir / File.Path.relative_to('Data')
                     FinalPath = FinalDir / File.Path.relative_to('Data')
-                    await aiofiles.os.makedirs(TempPath, exist_ok=True)
+                    os.makedirs(TempPath, exist_ok=True)
+                    os.makedirs(FinalPath, exist_ok=True)
                     
                     FileSize = await self.FetchFile(
                         File.Url, 
@@ -500,6 +501,8 @@ if __name__ == '__main__':
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
                     await asyncio.sleep(300)
+                except FileNotFoundError:
+                    Log.warning('Files Not Found')
                 except Exception as Error:
                     ErrorLogger(Error)
                     Log.error('Unexpected Error In Move Task')
