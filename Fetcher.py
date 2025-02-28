@@ -14,6 +14,7 @@ import shutil
 import json
 import sys
 import os
+import gc
 
 # Logging
 from rich.console import Console as RichConsole
@@ -29,6 +30,12 @@ SemaphoreLimit = 16
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
+
+TimeoutConfig = aiohttp.ClientTimeout(
+    total=300,
+    connect=30,
+    sock_read=60
+)
 
 # Logging Configuration
 class DownloadHighlighter(RegexHighlighter):
@@ -202,7 +209,7 @@ class Fetcher:
             try:
                 async with self.Session.get(
                     f'{BaseUrl}/account/favorites?type=artist',
-                    cookies={'session': self.Data[Platform]['Session']}
+                    cookies={'session': self.Data[Platform]['Session']},
                 ) as Response:
                     if Response.status == 200:
                         Creators = await Response.json()
@@ -341,6 +348,9 @@ class Downloader:
         if self.Stopped:
             return
         
+        if self.CompletedDownloads % 50 == 0:
+            gc.collect()
+        
         async with self.Semaphore:
             try:
                 if str(File.Hash) in self.Hashes:
@@ -427,7 +437,7 @@ if __name__ == '__main__':
                 finally:
                     DownloadQueue.task_done()
 
-        async with aiohttp.ClientSession() as Session:
+        async with aiohttp.ClientSession(timeout=TimeoutConfig) as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
