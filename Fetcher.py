@@ -1,6 +1,5 @@
 # Main Imports
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
-from tenacity.before_sleep import before_sleep_log
 from dataclasses import dataclass
 from typing import Union, Tuple
 from json import JSONEncoder
@@ -52,6 +51,16 @@ class DownloadHighlighter(RegexHighlighter):
         r'\[(?P<yellow>warning|Warning)\]',  # Warning messages
         r'\[(?P<green>info|Info)\]'  # Info messages
     ]
+
+def before_retry_log(retry_state):
+    File = retry_state.args[1].name if len(retry_state.args) > 1 else 'Unknown'
+    Error = retry_state.outcome.exception()
+    Delay = retry_state.next_action.sleep
+    Attempt = retry_state.attempt_number
+    Log.warning(
+        f'[yellow]Retry #{Attempt}[/] for [cyan]{File}[/] in [yellow]{Delay:.1f}s[/] '
+        f'([red]{Error.__class__.__name__}[/])'
+    )
 
 Console = RichConsole(
     theme=Theme({
@@ -106,7 +115,7 @@ Install(show_locals=True)
 RetryConfig = dict(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
-    before_sleep=before_sleep_log(Log, logging.WARNING),
+    before_sleep=before_retry_log,
     retry_error_cls=RetryError,
     retry=(
         retry_if_exception_type(aiohttp.ClientError) |

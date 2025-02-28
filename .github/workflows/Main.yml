@@ -73,5 +73,5 @@ jobs:
       - name: 🌐 Upload Data with Rclone
         run: |
           echo "🟢 Uploading Data to Pixeldrain..."
-          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 2 --transfers 32 -v
+          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
           echo "🟢 Upload complete."
