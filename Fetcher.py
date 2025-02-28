@@ -1,5 +1,5 @@
 # Main Imports
-from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
 from tenacity.before_sleep import before_sleep_log
 from dataclasses import dataclass
 from typing import Union, Tuple
@@ -93,7 +93,7 @@ Install(show_locals=True)
 
 RetryConfig = dict(
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=4, max=10),
+    wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
     before_sleep=before_sleep_log(Log, logging.WARNING),
     retry_error_cls=RetryError,
     retry=(
