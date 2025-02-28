@@ -1,6 +1,9 @@
 # Main Imports
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
+from tenacity.before_sleep import before_retry_log
+from rclone_python.remote_types import RemoteTypes
 from dataclasses import dataclass
+from rclone_python import rclone
 from typing import Union, Tuple
 from json import JSONEncoder
 from asyncio import Queue
@@ -9,6 +12,8 @@ import aiofiles.os
 import aiofiles
 import asyncio
 import aiohttp
+import random
+import string
 import shutil
 import psutil
 import json
@@ -31,6 +36,9 @@ QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
+rclone.set_log_level('ERROR')
+#rclone.create_remote(''.join(random.choices(string.ascii_letters, k=6)), RemoteTypes.pixeldrain, api_key='nice-try')
+print(rclone.ls(rclone.get_remotes()[-1]))
 
 TimeoutConfig = aiohttp.ClientTimeout(
     total=300,
@@ -51,16 +59,6 @@ class DownloadHighlighter(RegexHighlighter):
         r'\[(?P<yellow>warning|Warning)\]',  # Warning messages
         r'\[(?P<green>info|Info)\]'  # Info messages
     ]
-
-def before_retry_log(retry_state):
-    File = retry_state.args[1].name if len(retry_state.args) > 1 else 'Unknown'
-    Error = retry_state.outcome.exception()
-    Delay = retry_state.next_action.sleep
-    Attempt = retry_state.attempt_number
-    Log.warning(
-        f'[yellow]Retry #{Attempt}[/] for [cyan]{File}[/] in [yellow]{Delay:.1f}s[/] '
-        f'([red]{Error.__class__.__name__}[/])'
-    )
 
 Console = RichConsole(
     theme=Theme({
@@ -144,6 +142,8 @@ class LowDiskSpace(Exception):
     pass
 
 Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
+Log.info('[green]Rclone Is Installed[/]' if rclone.is_installed() else '[red]Rclone Is Not Installed. Transfers Will Not Work![/]')
+
 
 # Fetcher Class
 class Fetcher:
