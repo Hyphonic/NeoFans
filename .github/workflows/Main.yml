@@ -48,20 +48,20 @@ jobs:
         run: |
           python Fetcher.py
       
-      - name: 📃 List Files
-        run: |
-          cat Data/*.json
-          tree
+      # - name: 📃 List Files
+      #   run: |
+      #     cat Data/*.json
+      #     tree
 
-      - name: 🔼 Commit updated hashes
-        if: success()
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git pull
-          git add Data/*.json
-          git commit -m "Update Cached Hashes"
-          git push
+      # - name: 🔼 Commit updated hashes
+      #   if: success()
+      #   run: |
+      #     git config user.name "GitHub Actions"
+      #     git config user.email "actions@github.com"
+      #     git pull
+      #     git add Data/*.json
+      #     git commit -m "Update Cached Hashes"
+      #     git push
 
       - name: 🔁 Trigger Next Workflow
         if: success()
@@ -70,8 +70,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🌐 Upload Data with Rclone
-        run: |
-          echo "🟢 Uploading Data to Pixeldrain..."
-          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
-          echo "🟢 Upload complete."
+      # - name: 🌐 Upload Data with Rclone
+      #   run: |
+      #     echo "🟢 Uploading Data to Pixeldrain..."
+      #     rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
+      #     echo "🟢 Upload complete."
