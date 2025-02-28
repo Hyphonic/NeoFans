@@ -26,7 +26,7 @@ import logging
 # Config
 LowDiskSpaceThreshold = 5e+9 # 5GB
 SemaphoreLimit = 16
-QueueThresholds = [0.8, 0.5]
+QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
 
@@ -125,7 +125,7 @@ class CreatorData:
 class LowDiskSpace(Exception):
     pass
 
-Log.info(f'{QueueThresholds[1] * 100}% <-- Queue --> {QueueThresholds[0] * 100}%')
+Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
 
 # Fetcher Class
 class Fetcher:
@@ -232,7 +232,7 @@ class Fetcher:
         NewCounter = 0
         SkippedCounter = 0
         Page = StartingPage
-        QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[0]
+        QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[1]
 
         if self.Stopped:
             return
@@ -243,7 +243,7 @@ class Fetcher:
             while not self.Stopped:
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
-                    while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[1]):
+                    while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
                         await asyncio.sleep(1)
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
 
