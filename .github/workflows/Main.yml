@@ -8,6 +8,8 @@ on:
 
 jobs:
   download-content:
+    strategy:
+      fail-fast: false
     name: 🌐 Download Content
     runs-on: ubuntu-latest
     steps:
@@ -36,6 +38,7 @@ jobs:
           disable_base64: true
 
       - name: ⏬ Download All Content
+        timeout-minutes: 20
         env:
           COLUMNS: 120
           E621_LOGIN: ${{ secrets.E621_LOGIN }}
