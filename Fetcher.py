@@ -1,7 +1,6 @@
 # Main Imports
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
-from tenacity.before_sleep import before_retry_log
-from rclone_python.remote_types import RemoteTypes
+from tenacity.before_sleep import before_sleep_log
 from dataclasses import dataclass
 from rclone_python import rclone
 from typing import Union, Tuple
@@ -12,8 +11,6 @@ import aiofiles.os
 import aiofiles
 import asyncio
 import aiohttp
-import random
-import string
 import shutil
 import psutil
 import json
@@ -113,7 +110,7 @@ Install(show_locals=True)
 RetryConfig = dict(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
-    before_sleep=before_retry_log,
+    before_sleep=before_sleep_log(Log, logging.INFO),
     retry_error_cls=RetryError,
     retry=(
         retry_if_exception_type(aiohttp.ClientError) |
