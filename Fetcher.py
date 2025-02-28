@@ -117,7 +117,7 @@ def ErrorLogger(Error: Exception) -> None:
         width=Console.width or 120
     )
 
-Install())
+Install()
 
 RetryConfig = dict(
     stop=stop_after_attempt(3),
