@@ -350,7 +350,7 @@ class Downloader:
             return
         
         if self.CompletedDownloads % 10 == 0:
-            self.Log.info(f'{Humanize(psutil.virtual_memory().available)} Available Memory')
+            self.Log.info(f'{await Humanize(psutil.virtual_memory().available)} Available Memory')
             gc.collect()
         
         async with self.Semaphore:
