@@ -495,13 +495,7 @@ if __name__ == '__main__':
             Log.info('Starting Move Task')
             while True:
                 try:
-                    if Path(FinalDir).exists():
-                        DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
-                        Log.info(f'Final Path Directory Size: {await Humanize(DirSize)}')
-                        if DirSize > 0:
-                            Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
-                            rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
-                    await asyncio.sleep(60)
+                    rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
                 except RcloneException as Error:
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
