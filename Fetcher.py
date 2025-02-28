@@ -1,18 +1,21 @@
 # Main Imports
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
 from tenacity.before_sleep import before_sleep_log
-from dataclasses import dataclass
+from rclone_python.utils import RcloneException
 from rclone_python import rclone
-from typing import Union, Tuple
-from json import JSONEncoder
-from asyncio import Queue
-from pathlib import Path
 import aiofiles.os
 import aiofiles
 import asyncio
 import aiohttp
+
+# Default Imports
+from dataclasses import dataclass
+from typing import Union, Tuple
+from dotenv import load_dotenv
+from json import JSONEncoder
+from asyncio import Queue
+from pathlib import Path
 import shutil
-import psutil
 import random
 import json
 import sys
@@ -34,9 +37,11 @@ QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
+TempDir = Path('Data/Temp')
+FinalDir = Path('Data/Files')
+
 rclone.set_log_level('ERROR')
 #rclone.create_remote(''.join(random.choices(string.ascii_letters, k=6)), RemoteTypes.pixeldrain, api_key='nice-try')
-print(rclone.ls(rclone.get_remotes()[-1]))
 
 TimeoutConfig = aiohttp.ClientTimeout(
     total=300,
@@ -118,6 +123,7 @@ def ErrorLogger(Error: Exception) -> None:
     )
 
 Install()
+load_dotenv()
 
 RetryConfig = dict(
     stop=stop_after_attempt(3),
@@ -153,7 +159,6 @@ class LowDiskSpace(Exception):
 Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
 Log.info('[green]Rclone Is Installed[/]' if rclone.is_installed() else '[red]Rclone Is Not Installed. Transfers Will Not Work![/]')
 
-
 # Fetcher Class
 class Fetcher:
     def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
@@ -163,13 +168,7 @@ class Fetcher:
         self.TotalFiles = 0
         self.DownloadQueue = DownloadQueue
         self.Stopped = False
-        try:
-            with open('Data/Hashes.json', 'r') as Hashes:
-                self.Hashes = set(json.load(Hashes))
-            self.Log.info(f'Loaded {len(self.Hashes)} Hashes')
-        except FileNotFoundError:
-            self.Log.warning('No Hashes Found!')
-            self.Hashes = set()
+        self.Hashes = set()
         self.Data = {
             'coomer':
                 {
@@ -217,6 +216,40 @@ class Fetcher:
                     }
                 }
             }
+    
+    async def LookupHashes(self) -> None:
+        HashLookupTasks = []
+        ProcessedHashes = set()
+
+        async def ProcessCreator(Directory: str, CreatorName: str) -> None:
+            try:
+                Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
+                for File in [File['Name'] for File in Files]:
+                    Hash = Path(File).stem
+                    if len(Hash) >= 30:
+                        ProcessedHashes.add(Hash[:30])
+            except RcloneException as Error:
+                self.ErrorLogger(Error)
+                self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
+
+        for Platform in self.Data:
+            for Directory in self.Data[Platform]['Directory'].values():
+                try:
+                    Creators = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}')
+                    for Creator in Creators:
+                        HashLookupTasks.append(
+                            asyncio.create_task(
+                                ProcessCreator(Directory, Creator['Name'])
+                            )
+                        )
+                except RcloneException:
+                    self.Log.warning(f'Failed To Lookup Hashes For {Directory}')
+        
+        if HashLookupTasks:
+            self.Log.info(f'Looking Up Hashes From {len(HashLookupTasks)} Creators...')
+            await asyncio.gather(*HashLookupTasks)
+            self.Hashes = ProcessedHashes
+            self.Log.info(f'Loaded {len(self.Hashes)} Valid Hashes From Remote Storage')
 
     async def Favorites(self) -> None:
         self.Log.info('Fetching Favorites...')
@@ -290,7 +323,7 @@ class Fetcher:
                                     FilePath = Path(Post['file']['path'])
                                     TotalCounter += 1
                                     
-                                    if str(FilePath.stem) not in self.Hashes:
+                                    if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                         FileInfo = FileData(
                                             ID=Creator.ID,
                                             Name=Creator.Name,
@@ -315,7 +348,7 @@ class Fetcher:
                                         FilePath = Path(Attachment['path'])
                                         TotalCounter += 1
                                         
-                                        if str(FilePath.stem) not in self.Hashes:
+                                        if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                             FileInfo = FileData(
                                                 ID=Creator.ID,
                                                 Name=Creator.Name,
@@ -350,11 +383,7 @@ class Downloader:
         self.TotalFiles = 0
         self.Stopped = False
         self.Fetcher = Fetcher
-        try:
-            with open('Data/Hashes.json', 'r') as Hashes:
-                self.Hashes = set(json.load(Hashes))
-        except FileNotFoundError:
-            self.Hashes = set()
+        self.Hashes = Fetcher.Hashes
     
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
@@ -376,7 +405,6 @@ class Downloader:
             return
         
         if self.CompletedDownloads % 10 == 0:
-            self.Log.info(f'{await Humanize(psutil.virtual_memory().available)} Available Memory')
             gc.collect()
         
         async with self.Semaphore:
@@ -398,15 +426,21 @@ class Downloader:
                         raise LowDiskSpace(f'Available Disk Space Below {await Humanize(shutil.disk_usage(".").free)}')
                 
                     StartTime = asyncio.get_event_loop().time()
-                    OutPath = Path('Data/Files') / File.Path.relative_to('Data')
-                    await aiofiles.os.makedirs(OutPath, exist_ok=True)
+                    TempPath = TempDir / File.Path.relative_to('Data')
+                    FinalPath = FinalDir / File.Path.relative_to('Data')
+                    await aiofiles.os.makedirs(TempPath, exist_ok=True)
                     
                     FileSize = await self.FetchFile(
                         File.Url, 
-                        OutPath / f'{File.Hash[:30]}{File.Extension}'
+                        TempPath / f'{File.Hash[:30]}{File.Extension}'
                     )
                     
-                    if FileSize > 0:  # Only process if download successful
+                    if FileSize > 0:
+                        await aiofiles.os.makedirs(FinalPath, exist_ok=True)
+                        await aiofiles.os.rename(
+                            TempPath / f'{File.Hash[:30]}{File.Extension}',
+                            FinalPath / f'{File.Hash[:30]}{File.Extension}'
+                        )
                         self.Hashes.add(str(File.Hash))
                         self.CompletedDownloads += 1
                         ElapsedTime = asyncio.get_event_loop().time() - StartTime
@@ -457,6 +491,26 @@ class Encoder(JSONEncoder):
 
 if __name__ == '__main__':
     async def Main() -> None:
+        async def MoveToRemote():
+            Log.info('Starting Move Task')
+            while True:
+                try:
+                    if Path(FinalDir).exists():
+                        DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
+                        Log.info(f'Final Path Directory Size: {await Humanize(DirSize)}')
+                        if DirSize > 0:
+                            Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
+                            rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
+                    await asyncio.sleep(60)
+                except RcloneException as Error:
+                    ErrorLogger(Error)
+                    Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
+                    await asyncio.sleep(300)
+                except Exception as Error:
+                    ErrorLogger(Error)
+                    Log.error('Unexpected Error In Move Task')
+                    break
+                
         Log.info(f'[bold]Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}[/]')
         DownloadQueue = Queue(maxsize=100)
 
@@ -478,7 +532,10 @@ if __name__ == '__main__':
                 asyncio.create_task(ProcessDownloads(Download))
                 for _ in range(SemaphoreLimit)
             ]
-            
+
+            MoverTask = asyncio.create_task(MoveToRemote())
+
+            await Fetch.LookupHashes()
             await Fetch.Favorites()
             
             AllCreators = []
@@ -498,6 +555,7 @@ if __name__ == '__main__':
             for Task in DownloadTasks:
                 Task.cancel()
             await asyncio.gather(*DownloadTasks, return_exceptions=True)
+            MoverTask.cancel()
             
             await aiofiles.os.makedirs('Data', exist_ok=True)
             async with aiofiles.open('Data/Data.json', 'w', encoding='utf-8') as File:

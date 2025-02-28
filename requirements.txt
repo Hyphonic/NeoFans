@@ -7,5 +7,4 @@ rich
 aiohttp
 aiofiles
 tenacity
-psutil
 rclone-python
