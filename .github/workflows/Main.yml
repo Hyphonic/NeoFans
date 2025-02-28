@@ -22,10 +22,10 @@ jobs:
             gh run delete "$run_id" --repo "$REPO"
           done
 
-      # - name: 💾 Free Disk Space
-      #   uses: jlumbroso/free-disk-space@main
-      #   with:
-      #     tool-cache: true
+      - name: 💾 Free Disk Space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
 
       - name: 📥 Checkout Code
         uses: actions/checkout@v4
