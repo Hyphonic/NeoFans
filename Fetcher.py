@@ -128,7 +128,6 @@ load_dotenv()
 RetryConfig = dict(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
-    before_sleep=before_sleep_log(Log, logging.INFO),
     retry_error_cls=RetryError,
     retry=(
         retry_if_exception_type(aiohttp.ClientError) |
@@ -217,11 +216,20 @@ class Fetcher:
                 }
             }
     
+    async def CreateDirectories(self) -> None:
+        Directories = rclone.ls(f'{rclone.get_remotes()[-1]}')
+        for Platform in self.Data:
+            for Directory in self.Data[Platform]['Directory'].values():
+                if Directory not in [Dir['Name'] for Dir in Directories]:
+                    rclone.mkdir(f'{rclone.get_remotes()[-1]}{Directory}')
+                    self.Log.info(f'Created Missing Directory {Directory} On Remote Storage')
+    
     async def LookupHashes(self) -> None:
         HashLookupTasks = []
         ProcessedHashes = set()
 
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
+            self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
             try:
                 Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
                 for File in [File['Name'] for File in Files]:
@@ -252,7 +260,6 @@ class Fetcher:
             self.Log.info(f'Loaded {len(self.Hashes)} Valid Hashes From Remote Storage')
 
     async def Favorites(self) -> None:
-        self.Log.info('Fetching Favorites...')
         Counter = 0
         Tasks = []
         
@@ -472,6 +479,8 @@ class Downloader:
                         )
             except LowDiskSpace as Error:
                 raise Error
+            except FileExistsError:
+                pass
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']: 
@@ -493,11 +502,13 @@ class Encoder(JSONEncoder):
 if __name__ == '__main__':
     async def Main() -> None:
         async def MoveToRemote():
+            asyncio.sleep(5)
             Log.info('Starting Move Task')
             while True:
                 try:
-                    pass
-                    #rclone.move(str(FinalDir), rclone.get_remotes()[-1], pbar=None)
+                    Log.info('Moving Files To Remote Storage...')
+                    rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False)
+                    await asyncio.sleep(60)
                 except RcloneException as Error:
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
@@ -532,8 +543,11 @@ if __name__ == '__main__':
             ]
 
             MoverTask = asyncio.create_task(MoveToRemote())
-
+            Log.info('Creating Directories...')
+            await Fetch.CreateDirectories()
+            Log.info('Looking Up Hashes...')
             await Fetch.LookupHashes()
+            Log.info('Fetching Favorites...')
             await Fetch.Favorites()
             
             AllCreators = []
@@ -568,10 +582,18 @@ if __name__ == '__main__':
         asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
+        for File in TempDir.iterdir():
+            try:
+                Log.info(f'Deleting {File.name}')
+                File.unlink()
+            except Exception as Error:
+                ErrorLogger(Error)
         sys.exit(0)
     except LowDiskSpace as Error:
         Log.warning(Error)
         sys.exit(0)
+    except RcloneException:
+        pass
     except Exception as Error:
         if not isinstance(Error, asyncio.CancelledError):
             ErrorLogger(Error)
