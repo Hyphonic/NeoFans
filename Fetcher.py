@@ -31,6 +31,7 @@ SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
 StartingPage = 0
+ChunkSize = 3e+6
 
 TimeoutConfig = aiohttp.ClientTimeout(
     total=300,
@@ -338,12 +339,19 @@ class Downloader:
             self.Hashes = set()
     
     @retry(**RetryConfig)
-    async def FetchFile(self, Url: str) -> tuple[bytes, int]:
+    async def FetchFile(self, Url: str, OutPath: Path) -> int:
+        TotalSize = 0
         async with self.Session.get(Url) as Response:
             if Response.status != 200:
                 raise aiohttp.ClientError(f'Status: {Response.status}')
-            Content = await Response.read()
-            return Content, len(Content)
+            
+            async with aiofiles.open(OutPath, 'wb') as F:
+                async for Chunk in Response.content.iter_chunked(ChunkSize):
+                    if self.Stopped:
+                        return 0
+                    await F.write(Chunk)
+                    TotalSize += len(Chunk)
+        return TotalSize
     
     async def Download(self, File: FileData) -> None:
         if self.Stopped:
@@ -375,9 +383,12 @@ class Downloader:
                     OutPath = Path('Data/Files') / File.Path.relative_to('Data')
                     await aiofiles.os.makedirs(OutPath, exist_ok=True)
                     
-                    Content, FileSize = await self.FetchFile(File.Url)
-                    async with aiofiles.open(OutPath / f'{File.Hash[:30]}{File.Extension}', 'wb') as F:
-                        await F.write(Content)
+                    FileSize = await self.FetchFile(
+                        File.Url, 
+                        OutPath / f'{File.Hash[:30]}{File.Extension}'
+                    )
+                    
+                    if FileSize > 0:  # Only process if download successful
                         self.Hashes.add(str(File.Hash))
                         self.CompletedDownloads += 1
                         ElapsedTime = asyncio.get_event_loop().time() - StartTime
@@ -389,6 +400,7 @@ class Downloader:
                         ) if not self.Stopped else None
                         async with aiofiles.open('Data/Hashes.json', 'w') as f:
                             await f.write(json.dumps(list(self.Hashes)))
+                    
                 except LowDiskSpace as Error:
                     raise Error
                 except RetryError as Error:
