@@ -39,6 +39,9 @@ class DownloadHighlighter(RegexHighlighter):
         r'(?P<cyan>[a-f0-9]{30})',  # File hashes
         r'(?P<green>Downloaded|Skipping)',  # Status words
         r'(?P<yellow>[\d.]+s)',  # Time values
+        r'\[(?P<red>error|Error)\]',  # Error messages
+        r'\[(?P<yellow>warning|Warning)\]',  # Warning messages
+        r'\[(?P<green>info|Info)\]'  # Info messages
     ]
 
 Console = RichConsole(
@@ -344,7 +347,7 @@ class Downloader:
                     self.CompletedDownloads += 1
                     self.Log.warning(
                         f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
-                        f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Skipping '
+                        f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] [green]Skipping[/] '
                         f'{File.Hash[:30]}... '
                     ) if not self.Stopped else None
                     return
@@ -368,7 +371,7 @@ class Downloader:
                         ElapsedTime = asyncio.get_event_loop().time() - StartTime
                         self.Log.info(
                             f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
-                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Downloaded '
+                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] [green]Downloaded[/] '
                             f'{File.Hash[:30]}... '
                             f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                         ) if not self.Stopped else None
@@ -386,9 +389,9 @@ class Downloader:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
                         self.Log.warning(
-                            f'[#{self.CompletedDownloads}] ([bold cyan]{await Humanize(shutil.disk_usage(".").free)}[/]) '
-                            f'[[magenta]{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}[/]] Failed To Download '
-                            f'[bold cyan]{File.Hash[:30]}...[/]'
+                            f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
+                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
+                            f'{File.Hash[:30]}... '
                         )
             except LowDiskSpace as Error:
                 raise Error
