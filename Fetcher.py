@@ -496,7 +496,7 @@ if __name__ == '__main__':
                         FileCount = len(list(Path(FinalDir).rglob('*')))
                         TimeSinceLastMove = asyncio.get_event_loop().time() - LastMove
                         
-                        if FileCount >= 10 or TimeSinceLastMove >= 60:
+                        if FileCount >= 30 or TimeSinceLastMove >= 60:
                             DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
                             if DirSize > 0:
                                 Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
