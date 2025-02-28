@@ -28,7 +28,7 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = shutil.disk_usage('.').free * 0.1
+LowDiskSpaceThreshold = shutil.disk_usage('.').free * 0.3
 SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
@@ -114,11 +114,10 @@ Log.propagate = False
 def ErrorLogger(Error: Exception) -> None: 
     Console.print_exception(
         max_frames=1, 
-        show_locals=True, 
         width=Console.width or 120
     )
 
-Install(show_locals=True)
+Install())
 
 RetryConfig = dict(
     stop=stop_after_attempt(3),
