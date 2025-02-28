@@ -11,12 +11,10 @@ import aiohttp
 from dataclasses import dataclass
 from typing import Union, Tuple
 from dotenv import load_dotenv
-from json import JSONEncoder
 from asyncio import Queue
 from pathlib import Path
 import shutil
 import random
-import json
 import sys
 import os
 import gc
@@ -457,8 +455,6 @@ class Downloader:
                             f'{File.Hash[:30]}... '
                             f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                         ) if not self.Stopped else None
-                        async with aiofiles.open('Data/Hashes.json', 'w') as f:
-                            await f.write(json.dumps(list(self.Hashes)))
                     
                 except LowDiskSpace as Error:
                     raise Error
@@ -487,16 +483,6 @@ async def Humanize(Bytes: int) -> str:
             break
         Bytes /= 1024.0
     return f'{Bytes:.2f} [green]{Unit}[/]'
-
-# JSON Encoder
-class Encoder(JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, Path):
-            return str(obj)
-        if hasattr(obj, '__dataclass_fields__'):
-            return {k: str(getattr(obj, k)) if isinstance(getattr(obj, k), Path) 
-                   else getattr(obj, k) for k in obj.__dataclass_fields__}
-        return super().default(obj)
 
 if __name__ == '__main__':
     async def Main() -> None:
@@ -578,13 +564,6 @@ if __name__ == '__main__':
             MoverTask.cancel()
             
             await aiofiles.os.makedirs('Data', exist_ok=True)
-            async with aiofiles.open('Data/Data.json', 'w', encoding='utf-8') as File:
-                await File.write(json.dumps(
-                    Fetch.Data,
-                    indent=4,
-                    ensure_ascii=False,
-                    cls=Encoder
-                ))
 
     try:
         asyncio.run(Main())
