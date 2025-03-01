@@ -86,7 +86,8 @@ Console = RichConsole(
     theme=CustomTheme,
     force_terminal=True,
     log_path=False,
-    highlighter=DownloadHighlighter()
+    highlighter=DownloadHighlighter(),
+    color_system='truecolor'
 )
 
 ConsoleHandler = RichHandler(
