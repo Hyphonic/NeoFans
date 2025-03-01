@@ -64,8 +64,11 @@ jobs:
 
       - name: 🌐 Upload Data with Rclone
         run: |
+          echo "🟢 Reading optimal transfer count..."
+          TRANSFERS=$(cat Data/Transfers.txt)
+          echo "🟢 Using ${TRANSFERS} transfer threads"
           echo "🟢 Uploading Data to Pixeldrain..."
-          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
+          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers ${TRANSFERS} -v
           echo "🟢 Upload complete."
       
       - name: 🔁 Trigger Next Workflow

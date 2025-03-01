@@ -17,6 +17,7 @@ from asyncio import Queue
 from pathlib import Path
 import shutil
 import random
+import math
 import sys
 import os
 import gc
@@ -492,6 +493,9 @@ async def Humanize(Bytes: int) -> str:
         Bytes /= 1024.0
     return f'{Bytes:.2f} [green]{Unit}[/]'
 
+async def CalculateTransfers(FileCount, MinTransfers=4, MaxTransfers=32, MinFiles=100, MaxFiles=50000):
+    return max(MinTransfers, min(MaxTransfers, round(MinTransfers + (MaxTransfers - MinTransfers) * ((math.log(FileCount) - math.log(MinFiles)) / (math.log(MaxFiles) - math.log(MinFiles))))))
+
 if __name__ == '__main__':
     async def Main() -> None:
         async def MoveToRemote():
@@ -565,7 +569,12 @@ if __name__ == '__main__':
             await asyncio.gather(*DownloadTasks, return_exceptions=True)
             MoverTask.cancel() if UseRclone else None
 
-            await aiofiles.os.makedirs('Data', exist_ok=True)
+            FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
+            OptimalTransfers = await CalculateTransfers(FileCount)
+
+            async with aiofiles.open('Data/Transfers.txt', 'w') as F:
+                await F.write(str(OptimalTransfers))
+            Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based on {FileCount} files)')
 
     try:
         asyncio.run(Main())
