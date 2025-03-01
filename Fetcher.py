@@ -30,7 +30,7 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = shutil.disk_usage('.').free * 0.3
+LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
 PageOffset = 50
