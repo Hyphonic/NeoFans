@@ -47,7 +47,6 @@ InitialFreeSpace = shutil.disk_usage('.').free
 UploadThreshold = InitialFreeSpace * 0.1
 
 rclone.set_log_level('ERROR')
-#rclone.create_remote(''.join(random.choices(string.ascii_letters, k=6)), RemoteTypes.pixeldrain, api_key='nice-try')
 
 TimeoutConfig = aiohttp.ClientTimeout(
     total=300,
@@ -59,9 +58,7 @@ TimeoutConfig = aiohttp.ClientTimeout(
 class DownloadHighlighter(RegexHighlighter):
     base_style = 'downloader.'
     highlights = [
-        r'(?P<counter>#\d+)',                     # Download counter
-        r'(?P<size>[\d.]+ [KMGT]?B)',             # File sizes and disk space
-        r'(?P<queue>\d+/\d+)',                    # Queue status
+        r'(?P<size>[\d.]+%)',                      # Space percentage
         r'(?P<hash>[a-f0-9]{30})',                # File hashes
         r'(?P<status>Downloaded|Skipping)',       # Status words
         r'(?P<time>[\d.]+s)',                     # Time values
@@ -72,19 +69,17 @@ class DownloadHighlighter(RegexHighlighter):
 
 CustomTheme = Theme({
     'log.time': 'bright_black',
-    'logging.level.info': 'bright_green',
-    'logging.level.warning': 'bright_yellow',
-    'logging.level.error': 'bright_red',
+    'logging.level.info': '#A0D6B4',              # Pastel green
+    'logging.level.warning': '#F5D7A3',           # Pastel yellow
+    'logging.level.error': '#F5A3A3',             # Pastel red
     # Highlighter colors
-    'downloader.counter': 'bright_yellow',     # Make download numbers yellow
-    'downloader.size': 'bright_cyan',          # File sizes in cyan
-    'downloader.queue': 'bright_magenta',      # Queue numbers in magenta
-    'downloader.hash': 'bright_blue',          # File hashes in blue
-    'downloader.status': 'bright_green',       # Status words in green
-    'downloader.time': 'bright_yellow',        # Times in yellow
-    'downloader.error': 'bright_red',          # Error tags in red
-    'downloader.warning': 'bright_yellow',     # Warning tags in yellow
-    'downloader.info': 'bright_green'          # Info tags in green
+    'downloader.size': '#A3D1F5',                 # Pastel blue
+    'downloader.hash': '#C8A3F5',                 # Pastel purple
+    'downloader.status': '#A0D6B4',               # Pastel green
+    'downloader.time': '#F5D7A3',                 # Pastel yellow
+    'downloader.error': '#F5A3A3',                # Pastel red
+    'downloader.warning': '#F5D7A3',              # Pastel yellow
+    'downloader.info': '#A0D6B4'                  # Pastel green
 })
 
 Console = RichConsole(
@@ -158,8 +153,7 @@ class CreatorData:
 class LowDiskSpace(Exception):
     pass
 
-Log.info(f'{QueueThresholds[0] * 100}% <-- Queue --> {QueueThresholds[1] * 100}%')
-Log.info('[green]Rclone Is Installed[/]' if rclone.is_installed() else '[red]Rclone Is Not Installed. Transfers Will Not Work![/]')
+Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed. Transfers Will Not Work!')
 
 # Fetcher Class
 class Fetcher:
@@ -210,11 +204,11 @@ class Fetcher:
                         'gumroad': '🍬 Gumroad',
                         'fanbox': '📦 Fanbox'
                     },
-                    'Posts':    {
-                            'patreon': [],
-                            'subscribestar': [],
-                            'gumroad': [],
-                            'fanbox': []
+                    'Posts': {
+                        'patreon': [],
+                        'subscribestar': [],
+                        'gumroad': [],
+                        'fanbox': []
                     }
                 }
             }
@@ -297,7 +291,6 @@ class Fetcher:
         self.Log.info(f'Fetched {Counter} Favorites')
 
     async def Posts(self, Creator: CreatorData) -> None:
-        #self.Log.info(f'Fetching Posts From {Creator.Name}... ({Creator.ID})/{Creator.Service}')
         TotalCounter = 0
         NewCounter = 0
         SkippedCounter = 0
@@ -312,10 +305,10 @@ class Fetcher:
             nonlocal TotalCounter, NewCounter, SkippedCounter, Page
             while not self.Stopped:
                 if self.DownloadQueue.qsize() >= QueueThreshold:
-                    self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+                    self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
                         await asyncio.sleep(1)
-                    self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize}')
+                    self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
 
                 try:
                     async with self.Session.get(
@@ -344,7 +337,7 @@ class Fetcher:
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
                                         if self.DownloadQueue.full():
-                                            self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()}/{self.DownloadQueue.maxsize})')
+                                            self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
                                             break
                                         else:
                                             await self.DownloadQueue.put(FileInfo)
@@ -389,11 +382,11 @@ class Downloader:
         self.ErrorLogger = ErrorLogger
         self.Session = Session
         self.Semaphore = asyncio.Semaphore(SemaphoreLimit)
-        self.CompletedDownloads = 0
         self.TotalFiles = 0
         self.Stopped = False
         self.Fetcher = Fetcher
         self.Hashes = Fetcher.Hashes
+        self.InitialFreeSpace = shutil.disk_usage('.').free
 
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
@@ -414,17 +407,15 @@ class Downloader:
         if self.Stopped:
             return
 
-        if self.CompletedDownloads % 10 == 0:
+        if shutil.disk_usage('.').qsize % 10 == 0:
             gc.collect()
 
         async with self.Semaphore:
             try:
                 if str(File.Hash) in self.Hashes:
-                    self.CompletedDownloads += 1
+                    SpacePercentage = await self.CalculateSpacePercentage()
                     self.Log.warning(
-                        f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
-                        f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] [green]Skipping[/] '
-                        f'{File.Hash[:30]}... '
+                        f'({SpacePercentage}) Skipping {File.Hash[:30]}... '
                     ) if not self.Stopped else None
                     return
 
@@ -433,7 +424,7 @@ class Downloader:
                         self.Log.warning('Low Disk Space!') if not self.Stopped else None
                         self.Stopped = True
                         self.Fetcher.Stopped = True
-                        raise LowDiskSpace(f'Available Disk Space Below {await Humanize(shutil.disk_usage(".").free)}')
+                        raise LowDiskSpace(f'Available Disk Space Below {await self.CalculateSpacePercentage()}')
 
                     StartTime = asyncio.get_event_loop().time()
                     TempPath = TempDir / File.Path.relative_to('Data')
@@ -456,12 +447,10 @@ class Downloader:
                         except FileNotFoundError:
                             pass
                         self.Hashes.add(str(File.Hash))
-                        self.CompletedDownloads += 1
                         ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                        SpacePercentage = await self.CalculateSpacePercentage()
                         self.Log.info(
-                            f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
-                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] [green]Downloaded[/] '
-                            f'{File.Hash[:30]}... '
+                            f'({SpacePercentage}) Downloaded {File.Hash[:30]}... '
                             f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                         ) if not self.Stopped else None
 
@@ -470,28 +459,31 @@ class Downloader:
                 except RetryError as Error:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
-                        self.Log.warning(
-                            f'[#{self.CompletedDownloads}] Retry limit exceeded for {File.Hash[:30]}...'
-                        )
+                        self.Log.warning(f'Retry limit exceeded for {File.Hash[:30]}...')
                 except Exception as Error:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
-                        self.Log.warning(
-                            f'#{self.CompletedDownloads} ({await Humanize(shutil.disk_usage(".").free)}) '
-                            f'[{self.Fetcher.DownloadQueue.qsize()}/{self.Fetcher.DownloadQueue.maxsize}] Failed To Download '
-                            f'{File.Hash[:30]}... '
-                        )
+                        SpacePercentage = await self.CalculateSpacePercentage()
+                        self.Log.warning(f'({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
             except LowDiskSpace as Error:
                 raise Error
             except FileExistsError:
                 pass
+
+    async def CalculateSpacePercentage(self) -> str:
+        CurrentFreeSpace = shutil.disk_usage('.').free
+        UsedSpace = self.InitialFreeSpace - CurrentFreeSpace
+        if UsedSpace <= 0:
+            return '0.00%'
+        Percentage = min(100, (UsedSpace / (self.InitialFreeSpace - LowDiskSpaceThreshold)) * 100)
+        return f'{Percentage:.2f}%'
 
 async def Humanize(Bytes: int) -> str:
     for Unit in ['B', 'KB', 'MB', 'GB', 'TB']:
         if Bytes < 1024.0:
             break
         Bytes /= 1024.0
-    return f'{Bytes:.2f} [green]{Unit}[/]'
+    return f'{Bytes:.2f} {Unit}'
 
 async def CalculateTransfers(FileCount, MinTransfers=4, MaxTransfers=32, MinFiles=100, MaxFiles=50000):
     return max(MinTransfers, min(MaxTransfers, round(MinTransfers + (MaxTransfers - MinTransfers) * ((math.log(FileCount) - math.log(MinFiles)) / (math.log(MaxFiles) - math.log(MinFiles))))))
@@ -560,14 +552,15 @@ if __name__ == '__main__':
             for Creator in AllCreators:
                 await Fetch.Posts(Creator)
 
-            Fetch.Log.info(f'Fetched [bold cyan]{Fetch.TotalFiles}[/] Files')
+            Fetch.Log.info(f'Fetched {Fetch.TotalFiles} Files')
             Download.TotalFiles = Fetch.TotalFiles
 
             await DownloadQueue.join()
             for Task in DownloadTasks:
                 Task.cancel()
             await asyncio.gather(*DownloadTasks, return_exceptions=True)
-            MoverTask.cancel() if UseRclone else None
+            if MoverTask:
+                MoverTask.cancel()
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
