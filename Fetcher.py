@@ -563,7 +563,7 @@ if __name__ == '__main__':
             for Task in DownloadTasks:
                 Task.cancel()
             await asyncio.gather(*DownloadTasks, return_exceptions=True)
-            MoverTask.cancel()
+            MoverTask.cancel() if UseRclone else None
 
             await aiofiles.os.makedirs('Data', exist_ok=True)
 
