@@ -8,6 +8,7 @@ import asyncio
 import aiohttp
 
 # Default Imports
+from subprocess import DEVNULL, Popen
 from dataclasses import dataclass
 from typing import Union, Tuple
 from dotenv import load_dotenv
@@ -36,6 +37,8 @@ StartingPage = 0
 ChunkSize = 3e+6
 TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
+Transfers = 8
+MultiThreadStreams = 3
 
 rclone.set_log_level('ERROR')
 #rclone.create_remote(''.join(random.choices(string.ascii_letters, k=6)), RemoteTypes.pixeldrain, api_key='nice-try')
@@ -442,10 +445,13 @@ class Downloader:
                     
                     if FileSize > 0:
                         await aiofiles.os.makedirs(FinalPath, exist_ok=True)
-                        await aiofiles.os.rename(
-                            TempPath / f'{File.Hash[:30]}{File.Extension}',
-                            FinalPath / f'{File.Hash[:30]}{File.Extension}'
-                        )
+                        try:
+                            await aiofiles.os.rename(
+                                TempPath / f'{File.Hash[:30]}{File.Extension}',
+                                FinalPath / f'{File.Hash[:30]}{File.Extension}'
+                            )
+                        except FileNotFoundError:
+                            pass
                         self.Hashes.add(str(File.Hash))
                         self.CompletedDownloads += 1
                         ElapsedTime = asyncio.get_event_loop().time() - StartTime
@@ -496,17 +502,31 @@ if __name__ == '__main__':
                         FileCount = len(list(Path(FinalDir).rglob('*')))
                         TimeSinceLastMove = asyncio.get_event_loop().time() - LastMove
                         
-                        if FileCount >= 30 or TimeSinceLastMove >= 60:
+                        if FileCount >= 10 or TimeSinceLastMove >= 60:
                             DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
                             if DirSize > 0:
                                 Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
-                                rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False)
-                                LastMove = asyncio.get_event_loop().time()
+                                
+                                Process = Popen([
+                                    'rclone',
+                                    'copy',
+                                    str(FinalDir),
+                                    'Pixeldrain:',
+                                    '--disable-http2',
+                                    '--multi-thread-streams', str(MultiThreadStreams),
+                                    '--transfers', str(Transfers),
+                                    '-v'
+                                ], stdout=DEVNULL, stderr=DEVNULL)
+                                
+                                Process.wait()
+                                if Process.returncode == 0:
+                                    shutil.rmtree(FinalDir)
+                                    os.makedirs(FinalDir)
+                                    LastMove = asyncio.get_event_loop().time()
+                                else:
+                                    Log.warning('Rclone Move Failed')
+                                    
                     await asyncio.sleep(10)
-                except RcloneException as Error:
-                    ErrorLogger(Error)
-                    Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
-                    await asyncio.sleep(300)
                 except FileNotFoundError:
                     await asyncio.sleep(10)
                 except Exception as Error:
