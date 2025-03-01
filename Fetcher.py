@@ -407,7 +407,7 @@ class Downloader:
         if self.Stopped:
             return
 
-        if shutil.disk_usage('.').qsize % 10 == 0:
+        if random.random() < 0.1:
             gc.collect()
 
         async with self.Semaphore:
@@ -494,23 +494,44 @@ if __name__ == '__main__':
             Log.info('Starting Background Move Task')
             while True:
                 try:
-                    if Path(FinalDir).exists():
-                        DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
-                        if DirSize >= UploadThreshold:
-                            Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
-                            rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False, args=['--transfers', str(Transfers), '--multi-thread-streams', str(MultiThreadStreams)])
-                            Log.info('Move Completed')
-                    await asyncio.sleep(10)
+                    if not Path(FinalDir).exists():
+                        await asyncio.sleep(30)
+                        continue
+                        
+                    DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
+                    FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
+                    
+                    if DirSize >= UploadThreshold and FileCount > 0:
+                        HumanSize = await Humanize(DirSize)
+                        Log.info(f'Moving {HumanSize} ({FileCount} files) To Remote Storage')
+                        
+                        # Dynamic transfers based on file count
+                        DynamicTransfers = min(32, max(4, FileCount // 10))
+                        
+                        rclone.move(
+                            str(FinalDir), 
+                            rclone.get_remotes()[-1], 
+                            show_progress=False, 
+                            args=[
+                                '--transfers', str(DynamicTransfers),
+                                '--multi-thread-streams', str(MultiThreadStreams),
+                                '--checkers', str(min(32, DynamicTransfers * 2)),
+                                '--stats-one-line',
+                                '--stats', '1s'
+                            ]
+                        )
+                        Log.info('Move Completed')
+                    await asyncio.sleep(30)
                 except RcloneException as Error:
                     ErrorLogger(Error)
                     Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
                     await asyncio.sleep(300)
                 except FileNotFoundError:
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(30)
                 except Exception as Error:
                     ErrorLogger(Error)
                     Log.error('Unexpected Error In Move Task')
-                    await asyncio.sleep(30)
+                    await asyncio.sleep(60)
 
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=100)
