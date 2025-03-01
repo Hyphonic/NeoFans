@@ -54,7 +54,8 @@ TimeoutConfig = aiohttp.ClientTimeout(
 
 # Logging Configuration
 class DownloadHighlighter(RegexHighlighter):
-    base_highlights = [
+    base_style = 'downloader.'
+    highlights = [
         r'(?P<counter>#\d+)',                     # Download counter
         r'(?P<size>[\d.]+ [KMGT]?B)',             # File sizes and disk space
         r'(?P<queue>\d+/\d+)',                    # Queue status
@@ -72,48 +73,44 @@ CustomTheme = Theme({
     'logging.level.warning': 'bright_yellow',
     'logging.level.error': 'bright_red',
     # Highlighter colors
-    'counter': 'bright_yellow',     # Make download numbers yellow
-    'size': 'bright_cyan',          # File sizes in cyan
-    'queue': 'bright_magenta',      # Queue numbers in magenta
-    'hash': 'bright_blue',          # File hashes in blue
-    'status': 'bright_green',       # Status words in green
-    'time': 'bright_yellow',        # Times in yellow
-    'error': 'bright_red',          # Error tags in red
-    'warning': 'bright_yellow',     # Warning tags in yellow
-    'info': 'bright_green'          # Info tags in green
+    'downloader.counter': 'bright_yellow',     # Make download numbers yellow
+    'downloader.size': 'bright_cyan',          # File sizes in cyan
+    'downloader.queue': 'bright_magenta',      # Queue numbers in magenta
+    'downloader.hash': 'bright_blue',          # File hashes in blue
+    'downloader.status': 'bright_green',       # Status words in green
+    'downloader.time': 'bright_yellow',        # Times in yellow
+    'downloader.error': 'bright_red',          # Error tags in red
+    'downloader.warning': 'bright_yellow',     # Warning tags in yellow
+    'downloader.info': 'bright_green'          # Info tags in green
 })
 
 Console = RichConsole(
     theme=CustomTheme,
     force_terminal=True,
-    width=120,
     log_path=False,
-    highlighter=DownloadHighlighter(),
-    color_system='truecolor'
+    highlighter=DownloadHighlighter()
 )
-# Single handler configuration
+
 ConsoleHandler = RichHandler(
     markup=True,
     rich_tracebacks=True,
     show_time=True,
     console=Console,
     show_path=False,
-    omit_repeated_times=True
+    omit_repeated_times=True,
+    highlighter=DownloadHighlighter()
 )
 
-# Set formatter once
 ConsoleHandler.setFormatter(
     logging.Formatter('%(message)s', datefmt='[%H:%M:%S]')
 )
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     handlers=[ConsoleHandler],
     force=True
 )
 
-# Configure Rich Logger
 Log = logging.getLogger('rich')
 Log.handlers.clear()
 Log.addHandler(ConsoleHandler)
@@ -517,7 +514,7 @@ if __name__ == '__main__':
                     Log.error('Unexpected Error In Move Task')
                     await asyncio.sleep(30)
 
-        Log.info(f'[bold]Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}[/]')
+        Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=100)
 
         async def ProcessDownloads(Download: Downloader):
