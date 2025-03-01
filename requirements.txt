@@ -1,10 +1,10 @@
-python-dotenv
-backoff
-httpx[socks]
-git+https://github.com/bluet/proxybroker2.git
+# backoff
+# httpx[socks]
+# git+https://github.com/bluet/proxybroker2.git
 
 rich
 aiohttp
 aiofiles
 tenacity
+python-dotenv
 rclone-python
