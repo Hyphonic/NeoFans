@@ -503,7 +503,7 @@ if __name__ == '__main__':
                         DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
                         if DirSize >= UploadThreshold:
                             Log.info(f'Moving {await Humanize(DirSize)} To Remote Storage')
-                            rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=False, args=['--transfers', str(Transfers), '--multi-thread-streams', str(MultiThreadStreams)])
+                            rclone.move(str(FinalDir), rclone.get_remotes()[-1], show_progress=True, args=['--transfers', str(Transfers), '--multi-thread-streams', str(MultiThreadStreams)])
                             Log.info('Move Completed')
                     await asyncio.sleep(10)
                 except RcloneException as Error:
