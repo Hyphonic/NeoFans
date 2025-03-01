@@ -38,6 +38,8 @@ StartingPage = 0
 ChunkSize = 3e+6
 TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
+
+UseRclone = False
 Transfers = 12
 MultiThreadStreams = 3
 InitialFreeSpace = shutil.disk_usage('.').free
@@ -536,7 +538,7 @@ if __name__ == '__main__':
                 for _ in range(SemaphoreLimit)
             ]
 
-            MoverTask = asyncio.create_task(MoveToRemote())
+            MoverTask = asyncio.create_task(MoveToRemote()) if UseRclone else None
             Log.info('Creating Directories...')
             await Fetch.CreateDirectories()
             Log.info('Looking Up Hashes...')

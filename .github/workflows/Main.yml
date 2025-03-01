@@ -69,8 +69,8 @@ jobs:
       #   env:
       #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # - name: 🌐 Upload Data with Rclone
-      #   run: |
-      #     echo "🟢 Uploading Data to Pixeldrain..."
-      #     rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
-      #     echo "🟢 Upload complete."
+      - name: 🌐 Upload Data with Rclone
+        run: |
+          echo "🟢 Uploading Data to Pixeldrain..."
+          rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers 8 -v
+          echo "🟢 Upload complete."
