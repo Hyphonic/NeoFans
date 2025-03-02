@@ -4,6 +4,7 @@
 
 rich
 httpx[http2]
+psutil
 aiofiles
 tenacity
 python-dotenv

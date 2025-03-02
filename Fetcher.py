@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 import aiofiles.os
 import aiofiles
 import asyncio
+import psutil
 import httpx
 
 # Default Imports
@@ -450,6 +451,7 @@ class Downloader:
 
         if random.random() < 0.1:
             gc.collect()
+            self.Log.info(f'Free Memory: {await Humanize(psutil.virtual_memory().available)}')
 
         async with self.Semaphore:
             try:
