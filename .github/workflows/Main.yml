@@ -23,9 +23,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: ♻️ Setup Cloudflare Warp
-        uses: boywithkeyboard/warp@v1
 
       - name: 📦 Set Up Python
         uses: actions/setup-python@v5.4.0
