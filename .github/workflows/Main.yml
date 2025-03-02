@@ -3,8 +3,9 @@ name: Download Posts
 on:
   workflow_dispatch:
 
-#concurrency:
-#  group: download-posts
+concurrency:
+  group: download-posts
+  cancel-in-progress: false
 
 jobs:
   download-content:

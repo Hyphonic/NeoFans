@@ -1,0 +1,40 @@
+name: Hourly Workflow Scheduler
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+jobs:
+  check-and-run:
+    name: 🕒 Check and Run Workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🕒 Check For Running Workflows
+        id: check-running
+        run: |
+          # Fetch running workflow instances of the main workflow
+          RUNNING=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/${{ github.repository }}/actions/workflows/Main.yml/runs?status=in_progress \
+            --jq '.total_count')
+          
+          echo "Running workflows: $RUNNING"
+          
+          if [[ "$RUNNING" -gt "0" ]]; then
+            echo "Workflow is already running. Skipping."
+            echo "already_running=true" >> $GITHUB_OUTPUT
+          else
+            echo "No running workflow found. Will trigger new run."
+            echo "already_running=false" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: ♻️ Trigger Download Posts Workflow
+        if: steps.check-running.outputs.already_running == 'false'
+        run: |
+          echo "Triggering workflow..."
+          gh workflow run "Download Posts" --ref main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
