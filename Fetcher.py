@@ -21,6 +21,7 @@ import math
 import sys
 import os
 import gc
+import re
 
 # Logging
 from rich.console import Console as RichConsole
@@ -56,72 +57,85 @@ TimeoutConfig = aiohttp.ClientTimeout(
 )
 
 # Logging Configuration
+def GradientColor(Start, End, Steps):
+    return [
+        f'#{int(Start[1:3], 16) + int((int(End[1:3], 16) - int(Start[1:3], 16)) / Steps * Step):02X}'
+        f'{int(Start[3:5], 16) + int((int(End[3:5], 16) - int(Start[3:5], 16)) / Steps * Step):02X}'
+        f'{int(Start[5:], 16) + int((int(End[5:], 16) - int(Start[5:], 16)) / Steps * Step):02X}'
+        for Step in range(Steps)
+    ]
+
+def GenerateHighlightPatterns(Type, MaxValue, Format):
+    return [re.compile(Format.format(Value=Value, Max=MaxValue)) for Value in range(MaxValue + 1)]
+
 class DownloadHighlighter(RegexHighlighter):
     base_style = 'downloader.'
     highlights = [
-        r'(?P<size>[\d.]+%)',                       # Space percentage
-        r'(?P<hash>[a-f0-9]{30})',                  # File hashes
-        r'(?P<status>Downloaded|Skipping|Failed)',  # Download status
-        r'(?P<time>[\d.]+s)',                       # Time values
-        r'\[(?P<error>error|Error)\]',              # Error messages
-        r'\[(?P<warning>warning|Warning)\]',        # Warning messages
-        r'\[(?P<info>info|Info)\]'                  # Info messages
+        r'(?P<hash>[a-f0-9]{30})',
+        r'(?P<status>Downloaded|Skipping|Failed To Move)',
+        r'(?P<time>[\d.]+s)',
+        r'(?P<filesize>[\d.]+ [KMGT]B)',
+        r'\[(?P<error>error|Error)\]',
+        r'\[(?P<warning>warning|Warning)\]',
+        r'\[(?P<info>info|Info)\]',
     ]
+    
+    highlights.extend([rf'\[(?P<queue_{Queue}>{Queue}/{QueueLimit})\]' for Queue in range(QueueLimit + 1)])
+    highlights.extend([rf'(?P<percent_{Percent}>{Percent}%)' for Percent in range(101)])
 
-CustomTheme = Theme({
+ThemeDict = {
     'log.time': 'bright_black',
-    'logging.level.info': '#A0D6B4',                # Pastel green
-    'logging.level.warning': '#F5D7A3',             # Pastel yellow
-    'logging.level.error': '#F5A3A3',               # Pastel red
-                                                    # Highlighter colors
-    'downloader.size': '#A3D1F5',                   # Pastel blue
-    'downloader.hash': '#C8A3F5',                   # Pastel purple
-    'downloader.status': '#A0D6B4',                 # Pastel green
-    'downloader.time': '#F5D7A3',                   # Pastel yellow
-    'downloader.error': '#F5A3A3',                  # Pastel red
-    'downloader.warning': '#F5D7A3',                # Pastel yellow
-    'downloader.info': '#A0D6B4'                    # Pastel green
-})
+    'logging.level.info': '#A0D6B4',
+    'logging.level.warning': '#F5D7A3',
+    'logging.level.error': '#F5A3A3',
+    'downloader.filesize': '#A3D1F5',
+    'downloader.hash': '#C8A3F5',
+    'downloader.status': '#A0D6B4',
+    'downloader.time': '#F5D7A3',
+    'downloader.error': '#F5A3A3',
+    'downloader.warning': '#F5D7A3',
+    'downloader.info': '#A0D6B4'
+}
 
-Console = RichConsole(
-    theme=CustomTheme,
-    force_terminal=True,
-    log_path=False,
-    highlighter=DownloadHighlighter(),
-    color_system='truecolor'
-)
+def SetupThemeColors():
+    QueueColors = GradientColor('#F5A3A3', '#A0D6B4', QueueLimit + 1)
+    PercentColors = GradientColor('#A0D6B4', '#F5A3A3', 101)
+    
+    for Count, Color in enumerate(QueueColors):
+        ThemeDict[f'downloader.queue_{Count}'] = Color
+    
+    for Count, Color in enumerate(PercentColors):
+        ThemeDict[f'downloader.percent_{Count}'] = Color
+    
+    return Theme(ThemeDict)
 
-ConsoleHandler = RichHandler(
-    markup=True,
-    rich_tracebacks=True,
-    show_time=True,
-    console=Console,
-    show_path=False,
-    omit_repeated_times=True,
-    highlighter=DownloadHighlighter()
-)
+def InitLogging():
+    CustomTheme = SetupThemeColors()
+    Console = RichConsole(theme=CustomTheme, force_terminal=True, log_path=False, 
+                         highlighter=DownloadHighlighter(), color_system='truecolor')
+    
+    ConsoleHandler = RichHandler(markup=True, rich_tracebacks=True, show_time=True, 
+                                console=Console, show_path=False, omit_repeated_times=True,
+                                highlighter=DownloadHighlighter())
+    
+    ConsoleHandler.setFormatter(logging.Formatter('%(message)s', datefmt='[%H:%M:%S]'))
+    
+    logging.basicConfig(level=logging.INFO, handlers=[ConsoleHandler], force=True)
+    
+    Log = logging.getLogger('rich')
+    Log.handlers.clear()
+    Log.addHandler(ConsoleHandler)
+    Log.propagate = False
+    
+    return Console, Log
 
-ConsoleHandler.setFormatter(
-    logging.Formatter('%(message)s', datefmt='[%H:%M:%S]')
-)
+def ErrorLogger(Error):
+    if isinstance(Error, LowDiskSpace):
+        Log.warning(f'Low disk space: {Error}')
+    else:
+        Console.print_exception(max_frames=1, width=Console.width or 120)
 
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[ConsoleHandler],
-    force=True
-)
-
-Log = logging.getLogger('rich')
-Log.handlers.clear()
-Log.addHandler(ConsoleHandler)
-Log.propagate = False
-
-def ErrorLogger(Error: Exception) -> None: 
-    Console.print_exception(
-        max_frames=1,
-        width=Console.width or 120
-    )
-
+Console, Log = InitLogging()
 Install()
 load_dotenv()
 
@@ -416,8 +430,9 @@ class Downloader:
             try:
                 if str(File.Hash) in self.Hashes:
                     SpacePercentage = await self.CalculateSpacePercentage()
+                    QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
                     self.Log.warning(
-                        f'({SpacePercentage}) Skipping {File.Hash[:30]}... '
+                        f'{QueueStatus} ({SpacePercentage}) Skipping {File.Hash[:30]}... '
                     ) if not self.Stopped else None
                     return
 
@@ -447,20 +462,24 @@ class Downloader:
                         )
                     except FileNotFoundError:
                         SpacePercentage = await self.CalculateSpacePercentage()
-                        self.Log.warning(f'({SpacePercentage}) Failed To Move {File.Hash[:30]}... To Final Directory')
+                        QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
+                        self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Failed To Move {File.Hash[:30]}...')
                         pass
                     self.Hashes.add(str(File.Hash))
                     ElapsedTime = asyncio.get_event_loop().time() - StartTime
                     SpacePercentage = await self.CalculateSpacePercentage()
+                    QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
                     self.Log.info(
-                        f'({SpacePercentage}) Downloaded {File.Hash[:30]}... '
+                        f'{QueueStatus} ({SpacePercentage}) Downloaded {File.Hash[:30]}... '
                         f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                     ) if not self.Stopped else None
 
             except RetryError as Error:
                 if not self.Stopped:
                     self.ErrorLogger(Error)
-                    self.Log.warning(f'Retry limit exceeded for {File.Hash[:30]}...')
+                    SpacePercentage = await self.CalculateSpacePercentage()
+                    QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
+                    self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Retry Limit Exceeded For {File.Hash[:30]}...')
                     pass
             except Exception as Error:
                 if Error is any([
@@ -477,7 +496,8 @@ class Downloader:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
                         SpacePercentage = await self.CalculateSpacePercentage()
-                        self.Log.warning(f'({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
+                        QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
+                        self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
 
     async def CalculateSpacePercentage(self) -> str:
         CurrentFreeSpace = shutil.disk_usage('.').free
