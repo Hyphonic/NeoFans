@@ -104,7 +104,7 @@ ThemeDict = {
 
 def SetupThemeColors():
     QueueColors = GradientColor('#F5A3A3', '#A0D6B4', QueueLimit + 1)
-    PercentColors = GradientColor('#A0D6B4', '#F5A3A3', 101)
+    PercentColors = GradientColor('#F5A3A3', '#A0D6B4', 101)
 
     for Count, Color in enumerate(QueueColors):
         ThemeDict[f'downloader.queue_{Count}'] = Color
