@@ -148,6 +148,8 @@ def InitLogging():
     Log.addHandler(ConsoleHandler)
     Log.propagate = False
 
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+
     return Console, Log
 
 def ErrorLogger(Error):
