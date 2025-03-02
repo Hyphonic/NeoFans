@@ -32,8 +32,8 @@ import logging
 
 # Config
 LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
-SemaphoreLimit = 8
-QueueThresholds = [0.5, 0.8]
+SemaphoreLimit = 16
+QueueThresholds = [0.4, 0.8]
 QueueLimit = 500
 PageOffset = 50
 StartingPage = 0
