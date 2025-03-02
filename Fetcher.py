@@ -35,8 +35,8 @@ import logging
 # Config
 LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 SemaphoreLimit = 16
-QueueThresholds = [0.4, 0.8]
-QueueLimit = 500
+QueueThresholds = [0.2, 0.8]
+QueueLimit = 1000
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
@@ -543,14 +543,15 @@ if __name__ == '__main__':
                 finally:
                     DownloadQueue.task_done()
 
-        Limits = httpx.Limits(max_connections=SemaphoreLimit*4, max_keepalive_connections=SemaphoreLimit)
-        Transport = httpx.AsyncHTTPTransport(limits=Limits, retries=1)  # Built-in retry mechanism
+        Limits = httpx.Limits(max_connections=SemaphoreLimit*8, max_keepalive_connections=SemaphoreLimit*4, keepalive_expiry=30.0)
+        Transport = httpx.AsyncHTTPTransport(limits=Limits, retries=1, http2=True)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout=TimeoutConfig, connect=30.0, read=TimeoutConfig, write=TimeoutConfig),
             follow_redirects=True,
             transport=Transport,
             http2=True,
-            trust_env=True
+            trust_env=True,
+            verify=False
         ) as Client:
             Fetch = Fetcher(Client, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Client, Log, ErrorLogger, Fetch)
