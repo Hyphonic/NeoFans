@@ -41,13 +41,6 @@ StartingPage = 0
 ChunkSize = 3e+6
 TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
-
-UseRclone = False
-Transfers = 12
-MultiThreadStreams = 3
-InitialFreeSpace = shutil.disk_usage('.').free
-UploadThreshold = InitialFreeSpace * 0.1
-
 rclone.set_log_level('ERROR')
 
 TimeoutConfig = aiohttp.ClientTimeout(
@@ -74,7 +67,10 @@ class DownloadHighlighter(RegexHighlighter):
         r'(?P<hash>[a-f0-9]{30})',
         r'(?P<status>Downloaded|Skipping|Failed To Move)',
         r'(?P<time>[\d.]+s)',
-        r'(?P<filesize>[\d.]+ [KMGT]B)',
+        r'(?P<file_k>[\d.]+ KB)',
+        r'(?P<file_m>[\d.]+ MB)',
+        r'(?P<file_g>[\d.]+ GB)',
+        r'(?P<file_t>[\d.]+ TB)',
         r'\[(?P<error>error|Error)\]',
         r'\[(?P<warning>warning|Warning)\]',
         r'\[(?P<info>info|Info)\]',
@@ -93,18 +89,21 @@ ThemeDict = {
     'logging.level.info': '#A0D6B4',
     'logging.level.warning': '#F5D7A3',
     'logging.level.error': '#F5A3A3',
-    'downloader.filesize': '#A3D1F5',
+    'downloader.file_k': '#B5E8C9',
+    'downloader.file_m': '#D1C2E0',
+    'downloader.file_g': '#F7D4BC',
+    'downloader.file_t': '#B3D7EC',
     'downloader.hash': '#C8A3F5',
     'downloader.status': '#A0D6B4',
     'downloader.time': '#F5D7A3',
     'downloader.error': '#F5A3A3',
     'downloader.warning': '#F5D7A3',
-    'downloader.info': '#A0D6B4'
+    'downloader.info': '#A0D6B4',
 }
 
 def SetupThemeColors():
     QueueColors = GradientColor('#F5A3A3', '#A0D6B4', QueueLimit + 1)
-    PercentColors = GradientColor('#F5A3A3', '#A0D6B4', 101)
+    PercentColors = GradientColor('#A0D6B4', '#B3D7EC', 101)
 
     for Count, Color in enumerate(QueueColors):
         ThemeDict[f'downloader.queue_{Count}'] = Color
@@ -524,49 +523,6 @@ async def CalculateTransfers(FileCount, MinTransfers=4, MaxTransfers=32, MinFile
 
 if __name__ == '__main__':
     async def Main() -> None:
-        async def MoveToRemote():
-            Log.info('Starting Background Move Task')
-            while True:
-                try:
-                    if not Path(FinalDir).exists():
-                        await asyncio.sleep(30)
-                        continue
-
-                    DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
-                    FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
-
-                    if DirSize >= UploadThreshold and FileCount > 0:
-                        HumanSize = await Humanize(DirSize)
-                        Log.info(f'Moving {HumanSize} ({FileCount} files) To Remote Storage')
-
-                        # Dynamic transfers based on file count
-                        DynamicTransfers = min(32, max(4, FileCount // 10))
-
-                        rclone.move(
-                            str(FinalDir), 
-                            rclone.get_remotes()[-1], 
-                            show_progress=False, 
-                            args=[
-                                '--transfers', str(DynamicTransfers),
-                                '--multi-thread-streams', str(MultiThreadStreams),
-                                '--checkers', str(min(32, DynamicTransfers * 2)),
-                                '--stats-one-line',
-                                '--stats', '1s'
-                            ]
-                        )
-                        Log.info('Move Completed')
-                    await asyncio.sleep(30)
-                except RcloneException as Error:
-                    ErrorLogger(Error)
-                    Log.warning('Rclone Move Failed - Retrying In 5 Minutes')
-                    await asyncio.sleep(300)
-                except FileNotFoundError:
-                    await asyncio.sleep(30)
-                except Exception as Error:
-                    ErrorLogger(Error)
-                    Log.error('Unexpected Error In Move Task')
-                    await asyncio.sleep(60)
-
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
 
@@ -588,8 +544,6 @@ if __name__ == '__main__':
                 asyncio.create_task(ProcessDownloads(Download))
                 for _ in range(SemaphoreLimit)
             ]
-
-            MoverTask = asyncio.create_task(MoveToRemote()) if UseRclone else None
             Log.info('Creating Directories...')
             await Fetch.CreateDirectories()
             Log.info('Looking Up Hashes...')
@@ -614,8 +568,6 @@ if __name__ == '__main__':
             for Task in DownloadTasks:
                 Task.cancel()
             await asyncio.gather(*DownloadTasks, return_exceptions=True)
-            if MoverTask:
-                MoverTask.cancel()
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
