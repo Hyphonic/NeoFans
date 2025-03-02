@@ -79,9 +79,9 @@ class DownloadHighlighter(RegexHighlighter):
         r'\[(?P<warning>warning|Warning)\]',
         r'\[(?P<info>info|Info)\]',
     ]
-    
+
     highlights.extend([rf'\[(?P<queue_{Queue}>{Queue}/{QueueLimit})\]' for Queue in range(QueueLimit + 1)])
-    
+
     for Percent in range(101):
         if Percent < 100:
             highlights.append(rf'(?P<percent_{Percent}>{Percent}\.\d{{2}}%)')
@@ -105,33 +105,33 @@ ThemeDict = {
 def SetupThemeColors():
     QueueColors = GradientColor('#F5A3A3', '#A0D6B4', QueueLimit + 1)
     PercentColors = GradientColor('#A0D6B4', '#F5A3A3', 101)
-    
+
     for Count, Color in enumerate(QueueColors):
         ThemeDict[f'downloader.queue_{Count}'] = Color
-    
+
     for Count, Color in enumerate(PercentColors):
         ThemeDict[f'downloader.percent_{Count}'] = Color
-    
+
     return Theme(ThemeDict)
 
 def InitLogging():
     CustomTheme = SetupThemeColors()
     Console = RichConsole(theme=CustomTheme, force_terminal=True, log_path=False, 
                          highlighter=DownloadHighlighter(), color_system='truecolor')
-    
+
     ConsoleHandler = RichHandler(markup=True, rich_tracebacks=True, show_time=True, 
                                 console=Console, show_path=False, omit_repeated_times=True,
                                 highlighter=DownloadHighlighter())
-    
+
     ConsoleHandler.setFormatter(logging.Formatter('%(message)s', datefmt='[%H:%M:%S]'))
-    
+
     logging.basicConfig(level=logging.INFO, handlers=[ConsoleHandler], force=True)
-    
+
     Log = logging.getLogger('rich')
     Log.handlers.clear()
     Log.addHandler(ConsoleHandler)
     Log.propagate = False
-    
+
     return Console, Log
 
 def ErrorLogger(Error):
@@ -531,17 +531,17 @@ if __name__ == '__main__':
                     if not Path(FinalDir).exists():
                         await asyncio.sleep(30)
                         continue
-                        
+
                     DirSize = sum(f.stat().st_size for f in Path(FinalDir).rglob('*') if f.is_file())
                     FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
-                    
+
                     if DirSize >= UploadThreshold and FileCount > 0:
                         HumanSize = await Humanize(DirSize)
                         Log.info(f'Moving {HumanSize} ({FileCount} files) To Remote Storage')
-                        
+
                         # Dynamic transfers based on file count
                         DynamicTransfers = min(32, max(4, FileCount // 10))
-                        
+
                         rclone.move(
                             str(FinalDir), 
                             rclone.get_remotes()[-1], 
