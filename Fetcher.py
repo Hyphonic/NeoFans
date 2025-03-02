@@ -34,6 +34,7 @@ import logging
 LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 SemaphoreLimit = 8
 QueueThresholds = [0.5, 0.8]
+QueueLimit = 500
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
@@ -58,28 +59,28 @@ TimeoutConfig = aiohttp.ClientTimeout(
 class DownloadHighlighter(RegexHighlighter):
     base_style = 'downloader.'
     highlights = [
-        r'(?P<size>[\d.]+%)',                      # Space percentage
-        r'(?P<hash>[a-f0-9]{30})',                # File hashes
-        r'(?P<status>Downloaded|Skipping)',       # Status words
-        r'(?P<time>[\d.]+s)',                     # Time values
-        r'\[(?P<error>error|Error)\]',            # Error messages
-        r'\[(?P<warning>warning|Warning)\]',      # Warning messages
-        r'\[(?P<info>info|Info)\]'                # Info messages
+        r'(?P<size>[\d.]+%)',                       # Space percentage
+        r'(?P<hash>[a-f0-9]{30})',                  # File hashes
+        r'(?P<status>Downloaded|Skipping|Failed)',  # Download status
+        r'(?P<time>[\d.]+s)',                       # Time values
+        r'\[(?P<error>error|Error)\]',              # Error messages
+        r'\[(?P<warning>warning|Warning)\]',        # Warning messages
+        r'\[(?P<info>info|Info)\]'                  # Info messages
     ]
 
 CustomTheme = Theme({
     'log.time': 'bright_black',
-    'logging.level.info': '#A0D6B4',              # Pastel green
-    'logging.level.warning': '#F5D7A3',           # Pastel yellow
-    'logging.level.error': '#F5A3A3',             # Pastel red
-    # Highlighter colors
-    'downloader.size': '#A3D1F5',                 # Pastel blue
-    'downloader.hash': '#C8A3F5',                 # Pastel purple
-    'downloader.status': '#A0D6B4',               # Pastel green
-    'downloader.time': '#F5D7A3',                 # Pastel yellow
-    'downloader.error': '#F5A3A3',                # Pastel red
-    'downloader.warning': '#F5D7A3',              # Pastel yellow
-    'downloader.info': '#A0D6B4'                  # Pastel green
+    'logging.level.info': '#A0D6B4',                # Pastel green
+    'logging.level.warning': '#F5D7A3',             # Pastel yellow
+    'logging.level.error': '#F5A3A3',               # Pastel red
+                                                    # Highlighter colors
+    'downloader.size': '#A3D1F5',                   # Pastel blue
+    'downloader.hash': '#C8A3F5',                   # Pastel purple
+    'downloader.status': '#A0D6B4',                 # Pastel green
+    'downloader.time': '#F5D7A3',                   # Pastel yellow
+    'downloader.error': '#F5A3A3',                  # Pastel red
+    'downloader.warning': '#F5D7A3',                # Pastel yellow
+    'downloader.info': '#A0D6B4'                    # Pastel green
 })
 
 Console = RichConsole(
@@ -420,56 +421,63 @@ class Downloader:
                     ) if not self.Stopped else None
                     return
 
-                try:
-                    if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
-                        self.Log.warning('Low Disk Space!') if not self.Stopped else None
-                        self.Stopped = True
-                        self.Fetcher.Stopped = True
-                        raise LowDiskSpace(f'Available Disk Space Below {await self.CalculateSpacePercentage()}')
+                if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
+                    self.Log.warning('Low Disk Space!') if not self.Stopped else None
+                    self.Stopped = True
+                    self.Fetcher.Stopped = True
+                    raise LowDiskSpace(f'Available Disk Space Below {await self.CalculateSpacePercentage()}')
 
-                    StartTime = asyncio.get_event_loop().time()
-                    TempPath = TempDir / File.Path.relative_to('Data')
-                    FinalPath = FinalDir / File.Path.relative_to('Data')
-                    os.makedirs(TempPath, exist_ok=True)
-                    os.makedirs(FinalPath, exist_ok=True)
+                StartTime = asyncio.get_event_loop().time()
+                TempPath = TempDir / File.Path.relative_to('Data')
+                FinalPath = FinalDir / File.Path.relative_to('Data')
+                os.makedirs(TempPath, exist_ok=True)
+                os.makedirs(FinalPath, exist_ok=True)
 
-                    FileSize = await self.FetchFile(
-                        File.Url,
-                        TempPath / f'{File.Hash[:30]}{File.Extension}'
-                    )
+                FileSize = await self.FetchFile(
+                    File.Url,
+                    TempPath / f'{File.Hash[:30]}{File.Extension}'
+                )
 
-                    if FileSize > 0:
-                        await aiofiles.os.makedirs(FinalPath, exist_ok=True)
-                        try:
-                            await aiofiles.os.rename(
-                                TempPath / f'{File.Hash[:30]}{File.Extension}',
-                                FinalPath / f'{File.Hash[:30]}{File.Extension}'
-                            )
-                        except FileNotFoundError:
-                            pass
-                        self.Hashes.add(str(File.Hash))
-                        ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                if FileSize > 0:
+                    await aiofiles.os.makedirs(FinalPath, exist_ok=True)
+                    try:
+                        await aiofiles.os.rename(
+                            TempPath / f'{File.Hash[:30]}{File.Extension}',
+                            FinalPath / f'{File.Hash[:30]}{File.Extension}'
+                        )
+                    except FileNotFoundError:
                         SpacePercentage = await self.CalculateSpacePercentage()
-                        self.Log.info(
-                            f'({SpacePercentage}) Downloaded {File.Hash[:30]}... '
-                            f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
-                        ) if not self.Stopped else None
+                        self.Log.warning(f'({SpacePercentage}) Failed To Move {File.Hash[:30]}... To Final Directory')
+                        pass
+                    self.Hashes.add(str(File.Hash))
+                    ElapsedTime = asyncio.get_event_loop().time() - StartTime
+                    SpacePercentage = await self.CalculateSpacePercentage()
+                    self.Log.info(
+                        f'({SpacePercentage}) Downloaded {File.Hash[:30]}... '
+                        f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
+                    ) if not self.Stopped else None
 
-                except LowDiskSpace as Error:
-                    raise Error
-                except RetryError as Error:
-                    if not self.Stopped:
-                        self.ErrorLogger(Error)
-                        self.Log.warning(f'Retry limit exceeded for {File.Hash[:30]}...')
-                except Exception as Error:
+            except RetryError as Error:
+                if not self.Stopped:
+                    self.ErrorLogger(Error)
+                    self.Log.warning(f'Retry limit exceeded for {File.Hash[:30]}...')
+                    pass
+            except Exception as Error:
+                if Error is any([
+                    aiohttp.ClientError,
+                    asyncio.TimeoutError,
+                    aiohttp.ServerTimeoutError,
+                    BlockingIOError,
+                    RuntimeError,
+                    aiohttp.ClientConnectionError,
+                    aiohttp.ClientOSError
+                    ]):
+                    pass
+                else:
                     if not self.Stopped:
                         self.ErrorLogger(Error)
                         SpacePercentage = await self.CalculateSpacePercentage()
                         self.Log.warning(f'({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
-            except LowDiskSpace as Error:
-                raise Error
-            except FileExistsError:
-                pass
 
     async def CalculateSpacePercentage(self) -> str:
         CurrentFreeSpace = shutil.disk_usage('.').free
@@ -535,7 +543,7 @@ if __name__ == '__main__':
                     await asyncio.sleep(60)
 
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
-        DownloadQueue = Queue(maxsize=100)
+        DownloadQueue = Queue(maxsize=QueueLimit)
 
         async def ProcessDownloads(Download: Downloader):
             while True:
