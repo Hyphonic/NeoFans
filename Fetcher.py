@@ -300,27 +300,26 @@ class Fetcher:
     async def Favorites(self) -> None:
         Counter = 0
         Tasks = []
-
         @retry(**RetryConfig)
         async def Fetch(Platform: str, BaseUrl: str) -> None:
             nonlocal Counter
             try:
-                async with self.Client.get(
+                Response = await self.Client.get(
                     f'{BaseUrl}/account/favorites?type=artist',
                     cookies={'session': self.Data[Platform]['Session']},
-                ) as Response:
-                    Response.raise_for_status()
-                    Creators = Response.json()
-                    for Creator in Creators:
-                        self.Data[Platform]['Creators'][Creator['service']].append(
-                            CreatorData(
-                                ID=Creator['id'],
-                                Name=Creator['name'].title(),
-                                Platform=Platform,
-                                Service=Creator['service']
-                            )
+                )
+                Response.raise_for_status()
+                Creators = Response.json()
+                for Creator in Creators:
+                    self.Data[Platform]['Creators'][Creator['service']].append(
+                        CreatorData(
+                            ID=Creator['id'],
+                            Name=Creator['name'].title(),
+                            Platform=Platform,
+                            Service=Creator['service']
                         )
-                        Counter += 1
+                    )
+                    Counter += 1
             except Exception as Error:
                 self.ErrorLogger(Error)
                 self.Log.warning(f'Failed To Fetch Favorites From {Platform.capitalize()}')
@@ -352,61 +351,61 @@ class Fetcher:
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
 
                 try:
-                    async with self.Client.get(
+                    Response = await self.Client.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
                         cookies={'session': self.Data[Creator.Platform]['Session']},
                         params={'o': Page * PageOffset}
-                    ) as Response:
-                        if Response.status == 200:
-                            Posts = await Response.json()
-                            if not Posts:
-                                break
+                    )
+                    if Response.status_code == 200:
+                        Posts = Response.json()
+                        if not Posts:
+                            break
 
-                            for Post in Posts:
-                                if Post.get('file') and Post['file'].get('path'):
-                                    FilePath = Path(Post['file']['path'])
+                        for Post in Posts:
+                            if Post.get('file') and Post['file'].get('path'):
+                                FilePath = Path(Post['file']['path'])
+                                TotalCounter += 1
+
+                                if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
+                                    FileInfo = FileData(
+                                        ID=Creator.ID,
+                                        Name=Creator.Name,
+                                        Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
+                                        Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
+                                        Hash=FilePath.stem,
+                                        Extension=FilePath.suffix
+                                    )
+                                    self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                    if self.DownloadQueue.full():
+                                        self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
+                                        break
+                                    else:
+                                        await self.DownloadQueue.put(FileInfo)
+                                    NewCounter += 1
+                                    self.TotalFiles += 1
+                                else:
+                                    SkippedCounter += 1
+
+                            for Attachment in Post.get('attachments', []):
+                                if Attachment.get('path'):
+                                    FilePath = Path(Attachment['path'])
                                     TotalCounter += 1
 
                                     if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                         FileInfo = FileData(
                                             ID=Creator.ID,
                                             Name=Creator.Name,
-                                            Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
+                                            Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
                                             Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
                                             Hash=FilePath.stem,
                                             Extension=FilePath.suffix
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                        if self.DownloadQueue.full():
-                                            self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
-                                            break
-                                        else:
-                                            await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
                                         self.TotalFiles += 1
                                     else:
                                         SkippedCounter += 1
-
-                                for Attachment in Post.get('attachments', []):
-                                    if Attachment.get('path'):
-                                        FilePath = Path(Attachment['path'])
-                                        TotalCounter += 1
-
-                                        if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
-                                            FileInfo = FileData(
-                                                ID=Creator.ID,
-                                                Name=Creator.Name,
-                                                Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
-                                                Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
-                                                Hash=FilePath.stem,
-                                                Extension=FilePath.suffix
-                                            )
-                                            self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                            NewCounter += 1
-                                            self.TotalFiles += 1
-                                        else:
-                                            SkippedCounter += 1
-                            Page += 1
+                        Page += 1
                 except Exception as Error:
                     self.ErrorLogger(Error)
                     self.Log.warning(f'Failed To Fetch Posts From {Creator.Name}')
