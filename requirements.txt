@@ -3,7 +3,7 @@
 # git+https://github.com/bluet/proxybroker2.git
 
 rich
-httpx
+httpx[http2]
 aiofiles
 tenacity
 python-dotenv
