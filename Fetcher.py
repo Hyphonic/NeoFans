@@ -81,7 +81,12 @@ class DownloadHighlighter(RegexHighlighter):
     ]
     
     highlights.extend([rf'\[(?P<queue_{Queue}>{Queue}/{QueueLimit})\]' for Queue in range(QueueLimit + 1)])
-    highlights.extend([rf'(?P<percent_{Percent}>{Percent}%)' for Percent in range(101)])
+    
+    for Percent in range(101):
+        if Percent < 100:
+            highlights.append(rf'(?P<percent_{Percent}>{Percent}\.\d{{2}}%)')
+        else:
+            highlights.append(r'(?P<percent_100>100\.00%)')
 
 ThemeDict = {
     'log.time': 'bright_black',
