@@ -3,7 +3,6 @@ from rich.traceback import install as Install
 from rich.highlighter import RegexHighlighter
 from rich.logging import RichHandler
 from rich.theme import Theme
-from rich.style import Style
 import logging
 import re
 

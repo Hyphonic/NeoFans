@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 import aiofiles.os
 import aiofiles
 import asyncio
-import aiohttp
+import httpx
 
 # Default Imports
 from dataclasses import dataclass
@@ -43,11 +43,28 @@ TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
 rclone.set_log_level('ERROR')
 
-TimeoutConfig = aiohttp.ClientTimeout(
-    total=300,
-    connect=30,
-    sock_read=60
-)
+TimeoutConfig = 300.0
+
+HttpxExceptions = [
+    httpx.ConnectError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.ProtocolError,
+    httpx.RemoteProtocolError,
+    httpx.LocalProtocolError,
+    httpx.PoolTimeout,
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+    httpx.RequestError,
+    httpx.HTTPStatusError,
+    httpx.InvalidURL,
+    httpx.TooManyRedirects,
+    httpx.StreamError,
+    httpx.DecodingError,
+    httpx.CookieConflict
+]
 
 # Logging Configuration
 def GradientColor(Start, End, Steps):
@@ -148,8 +165,12 @@ RetryConfig = dict(
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
     retry_error_cls=RetryError,
     retry=(
-        retry_if_exception_type(aiohttp.ClientError) |
-        retry_if_exception_type(aiohttp.ServerTimeoutError) |
+        retry_if_exception_type(httpx.ConnectError) |
+        retry_if_exception_type(httpx.ReadTimeout) |
+        retry_if_exception_type(httpx.WriteTimeout) |
+        retry_if_exception_type(httpx.PoolTimeout) |
+        retry_if_exception_type(httpx.TimeoutException) |
+        retry_if_exception_type(httpx.NetworkError) |
         retry_if_exception_type(asyncio.TimeoutError)
     )
 )
@@ -177,10 +198,10 @@ Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Inst
 
 # Fetcher Class
 class Fetcher:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
+    def __init__(self, Client: httpx.AsyncClient, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
-        self.Session = Session
+        self.Client = Client
         self.TotalFiles = 0
         self.DownloadQueue = DownloadQueue
         self.Stopped = False
@@ -284,22 +305,22 @@ class Fetcher:
         async def Fetch(Platform: str, BaseUrl: str) -> None:
             nonlocal Counter
             try:
-                async with self.Session.get(
+                async with self.Client.get(
                     f'{BaseUrl}/account/favorites?type=artist',
                     cookies={'session': self.Data[Platform]['Session']},
                 ) as Response:
-                    if Response.status == 200:
-                        Creators = await Response.json()
-                        for Creator in Creators:
-                            self.Data[Platform]['Creators'][Creator['service']].append(
-                                CreatorData(
-                                    ID=Creator['id'],
-                                    Name=Creator['name'].title(),
-                                    Platform=Platform,
-                                    Service=Creator['service']
-                                )
+                    Response.raise_for_status()
+                    Creators = Response.json()
+                    for Creator in Creators:
+                        self.Data[Platform]['Creators'][Creator['service']].append(
+                            CreatorData(
+                                ID=Creator['id'],
+                                Name=Creator['name'].title(),
+                                Platform=Platform,
+                                Service=Creator['service']
                             )
-                            Counter += 1
+                        )
+                        Counter += 1
             except Exception as Error:
                 self.ErrorLogger(Error)
                 self.Log.warning(f'Failed To Fetch Favorites From {Platform.capitalize()}')
@@ -331,7 +352,7 @@ class Fetcher:
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
 
                 try:
-                    async with self.Session.get(
+                    async with self.Client.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
                         cookies={'session': self.Data[Creator.Platform]['Session']},
                         params={'o': Page * PageOffset}
@@ -397,10 +418,10 @@ class Fetcher:
 
 # Downloader Class
 class Downloader:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
+    def __init__(self, Client: httpx.AsyncClient, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
-        self.Session = Session
+        self.Client = Client
         self.Semaphore = asyncio.Semaphore(SemaphoreLimit)
         self.TotalFiles = 0
         self.Stopped = False
@@ -411,16 +432,15 @@ class Downloader:
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
         TotalSize = 0
-        async with self.Session.get(Url) as Response:
-            if Response.status != 200:
-                raise aiohttp.ClientError(f'Status: {Response.status}')
-
-            async with aiofiles.open(OutPath, 'wb') as F:
-                async for Chunk in Response.content.iter_chunked(ChunkSize):
-                    if self.Stopped:
-                        return 0
-                    await F.write(Chunk)
-                    TotalSize += len(Chunk)
+        Response = await self.Client.get(Url, follow_redirects=True)
+        Response.raise_for_status()
+        
+        async with aiofiles.open(OutPath, 'wb') as f:
+            async for chunk in Response.aiter_bytes(chunk_size=int(ChunkSize)):
+                if self.Stopped:
+                    return 0
+                await f.write(chunk)
+                TotalSize += len(chunk)
         return TotalSize
 
     async def Download(self, File: FileData) -> None:
@@ -477,24 +497,8 @@ class Downloader:
                         f'{QueueStatus} ({SpacePercentage}) Downloaded {File.Hash[:30]}... '
                         f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                     ) if not self.Stopped else None
-
-            except RetryError as Error:
-                if not self.Stopped:
-                    self.ErrorLogger(Error)
-                    SpacePercentage = await self.CalculateSpacePercentage()
-                    QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
-                    self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Retry Limit Exceeded For {File.Hash[:30]}...')
-                    pass
             except Exception as Error:
-                if Error is any([
-                    aiohttp.ClientError,
-                    asyncio.TimeoutError,
-                    aiohttp.ServerTimeoutError,
-                    BlockingIOError,
-                    RuntimeError,
-                    aiohttp.ClientConnectionError,
-                    aiohttp.ClientOSError
-                    ]):
+                if any(isinstance(Error, ExceptionType) for ExceptionType in HttpxExceptions + [BlockingIOError, RuntimeError, RetryError]):
                     pass
                 else:
                     if not self.Stopped:
@@ -536,9 +540,17 @@ if __name__ == '__main__':
                 finally:
                     DownloadQueue.task_done()
 
-        async with aiohttp.ClientSession(timeout=TimeoutConfig) as Session:
-            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
-            Download = Downloader(Session, Log, ErrorLogger, Fetch)
+        Limits = httpx.Limits(max_connections=SemaphoreLimit*4, max_keepalive_connections=SemaphoreLimit)
+        Transport = httpx.AsyncHTTPTransport(limits=Limits, retries=1)  # Built-in retry mechanism
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout=TimeoutConfig, connect=30.0, read=TimeoutConfig, write=TimeoutConfig),
+            follow_redirects=True,
+            transport=Transport,
+            http2=True,
+            trust_env=True
+        ) as Client:
+            Fetch = Fetcher(Client, Log, ErrorLogger, DownloadQueue)
+            Download = Downloader(Client, Log, ErrorLogger, Fetch)
 
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
