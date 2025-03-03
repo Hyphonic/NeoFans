@@ -3,7 +3,11 @@
 # git+https://github.com/bluet/proxybroker2.git
 
 rich
-httpx[http2]
+aiodns
+uvloop
+orjson
+aiohttp
+cchardet
 psutil
 aiofiles
 tenacity

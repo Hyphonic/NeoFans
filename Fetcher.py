@@ -3,13 +3,17 @@
 # Rclone Configuration - https://rclone.org/docs/
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
 from rclone_python.utils import RcloneException
+from aiohttp.resolver import AsyncResolver
 from rclone_python import rclone
 from dotenv import load_dotenv
 import aiofiles.os
 import aiofiles
 import asyncio
 import psutil
-import httpx
+import aiohttp
+import uvloop
+import orjson
+import aiodns
 
 # Default Imports
 from dataclasses import dataclass
@@ -35,7 +39,7 @@ import logging
 # Config
 LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 SemaphoreLimit = 16
-QueueThresholds = [0.2, 0.8]
+QueueThresholds = [0.2, 0.8] # Pause at 20%, Resume at 80%
 QueueLimit = 1000
 PageOffset = 50
 StartingPage = 0
@@ -46,25 +50,19 @@ rclone.set_log_level('ERROR')
 
 TimeoutConfig = 300.0
 
-HttpxExceptions = [
-    httpx.ConnectError,
-    httpx.ReadError,
-    httpx.WriteError,
-    httpx.TimeoutException,
-    httpx.NetworkError,
-    httpx.ProtocolError,
-    httpx.RemoteProtocolError,
-    httpx.LocalProtocolError,
-    httpx.PoolTimeout,
-    httpx.ReadTimeout,
-    httpx.ConnectTimeout,
-    httpx.RequestError,
-    httpx.HTTPStatusError,
-    httpx.InvalidURL,
-    httpx.TooManyRedirects,
-    httpx.StreamError,
-    httpx.DecodingError,
-    httpx.CookieConflict
+AiohttpExceptions = [
+    aiohttp.ClientError,
+    aiohttp.ClientConnectionError, 
+    aiohttp.ClientOSError,
+    aiohttp.ServerConnectionError,
+    aiohttp.ServerDisconnectedError,
+    aiohttp.ServerTimeoutError,
+    aiohttp.ClientResponseError,
+    aiohttp.ClientPayloadError,
+    aiohttp.ClientHttpProxyError,
+    aiohttp.WSServerHandshakeError,
+    aiohttp.ContentTypeError,
+    asyncio.TimeoutError
 ]
 
 # Logging Configuration
@@ -168,12 +166,10 @@ RetryConfig = dict(
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
     retry_error_cls=RetryError,
     retry=(
-        retry_if_exception_type(httpx.ConnectError) |
-        retry_if_exception_type(httpx.ReadTimeout) |
-        retry_if_exception_type(httpx.WriteTimeout) |
-        retry_if_exception_type(httpx.PoolTimeout) |
-        retry_if_exception_type(httpx.TimeoutException) |
-        retry_if_exception_type(httpx.NetworkError) |
+        retry_if_exception_type(aiohttp.ClientConnectionError) |
+        retry_if_exception_type(aiohttp.ServerTimeoutError) |
+        retry_if_exception_type(aiohttp.ClientPayloadError) |
+        retry_if_exception_type(aiohttp.ServerDisconnectedError) |
         retry_if_exception_type(asyncio.TimeoutError)
     )
 )
@@ -201,10 +197,10 @@ Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Inst
 
 # Fetcher Class
 class Fetcher:
-    def __init__(self, Client: httpx.AsyncClient, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
+    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
-        self.Client = Client
+        self.Session = Session
         self.TotalFiles = 0
         self.DownloadQueue = DownloadQueue
         self.Stopped = False
@@ -307,22 +303,22 @@ class Fetcher:
         async def Fetch(Platform: str, BaseUrl: str) -> None:
             nonlocal Counter
             try:
-                Response = await self.Client.get(
+                async with self.Session.get(
                     f'{BaseUrl}/account/favorites?type=artist',
-                    cookies={'session': self.Data[Platform]['Session']},
-                )
-                Response.raise_for_status()
-                Creators = Response.json()
-                for Creator in Creators:
-                    self.Data[Platform]['Creators'][Creator['service']].append(
-                        CreatorData(
-                            ID=Creator['id'],
-                            Name=Creator['name'].title(),
-                            Platform=Platform,
-                            Service=Creator['service']
+                    cookies={'session': self.Data[Platform]['Session']}
+                ) as Response:
+                    Response.raise_for_status()
+                    Creators = orjson.loads(await Response.text())
+                    for Creator in Creators:
+                        self.Data[Platform]['Creators'][Creator['service']].append(
+                            CreatorData(
+                                ID=Creator['id'],
+                                Name=Creator['name'].title(),
+                                Platform=Platform,
+                                Service=Creator['service']
+                            )
                         )
-                    )
-                    Counter += 1
+                        Counter += 1
             except Exception as Error:
                 self.ErrorLogger(Error)
                 self.Log.warning(f'Failed To Fetch Favorites From {Platform.capitalize()}')
@@ -354,61 +350,61 @@ class Fetcher:
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
 
                 try:
-                    Response = await self.Client.get(
+                    async with self.Session.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
                         cookies={'session': self.Data[Creator.Platform]['Session']},
                         params={'o': Page * PageOffset}
-                    )
-                    if Response.status_code == 200:
-                        Posts = Response.json()
-                        if not Posts:
-                            break
+                    ) as Response:
+                        if Response.status == 200:
+                            Posts = orjson.loads(await Response.text())
+                            if not Posts:
+                                break
 
-                        for Post in Posts:
-                            if Post.get('file') and Post['file'].get('path'):
-                                FilePath = Path(Post['file']['path'])
-                                TotalCounter += 1
-
-                                if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
-                                    FileInfo = FileData(
-                                        ID=Creator.ID,
-                                        Name=Creator.Name,
-                                        Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
-                                        Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
-                                        Hash=FilePath.stem,
-                                        Extension=FilePath.suffix
-                                    )
-                                    self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                    if self.DownloadQueue.full():
-                                        self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
-                                        break
-                                    else:
-                                        await self.DownloadQueue.put(FileInfo)
-                                    NewCounter += 1
-                                    self.TotalFiles += 1
-                                else:
-                                    SkippedCounter += 1
-
-                            for Attachment in Post.get('attachments', []):
-                                if Attachment.get('path'):
-                                    FilePath = Path(Attachment['path'])
+                            for Post in Posts:
+                                if Post.get('file') and Post['file'].get('path'):
+                                    FilePath = Path(Post['file']['path'])
                                     TotalCounter += 1
 
                                     if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                         FileInfo = FileData(
                                             ID=Creator.ID,
                                             Name=Creator.Name,
-                                            Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
+                                            Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Post["file"]["path"]}',
                                             Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
                                             Hash=FilePath.stem,
                                             Extension=FilePath.suffix
                                         )
                                         self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                        if self.DownloadQueue.full():
+                                            self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
+                                            break
+                                        else:
+                                            await self.DownloadQueue.put(FileInfo)
                                         NewCounter += 1
                                         self.TotalFiles += 1
                                     else:
                                         SkippedCounter += 1
-                        Page += 1
+
+                                for Attachment in Post.get('attachments', []):
+                                    if Attachment.get('path'):
+                                        FilePath = Path(Attachment['path'])
+                                        TotalCounter += 1
+
+                                        if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
+                                            FileInfo = FileData(
+                                                ID=Creator.ID,
+                                                Name=Creator.Name,
+                                                Url=f'{self.Data[Creator.Platform]["FileUrl"]}{Attachment["path"]}',
+                                                Path=Path(f'Data/{self.Data[Creator.Platform]["Directory"][Creator.Service]}/{Creator.Name}'),
+                                                Hash=FilePath.stem,
+                                                Extension=FilePath.suffix
+                                            )
+                                            self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                            NewCounter += 1
+                                            self.TotalFiles += 1
+                                        else:
+                                            SkippedCounter += 1
+                            Page += 1
                 except Exception as Error:
                     self.ErrorLogger(Error)
                     self.Log.warning(f'Failed To Fetch Posts From {Creator.Name}')
@@ -420,10 +416,10 @@ class Fetcher:
 
 # Downloader Class
 class Downloader:
-    def __init__(self, Client: httpx.AsyncClient, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
+    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
-        self.Client = Client
+        self.Session = Session
         self.Semaphore = asyncio.Semaphore(SemaphoreLimit)
         self.TotalFiles = 0
         self.Stopped = False
@@ -434,15 +430,14 @@ class Downloader:
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
         TotalSize = 0
-        Response = await self.Client.get(Url, follow_redirects=True)
-        Response.raise_for_status()
-        
-        async with aiofiles.open(OutPath, 'wb') as f:
-            async for chunk in Response.aiter_bytes(chunk_size=int(ChunkSize)):
-                if self.Stopped:
-                    return 0
-                await f.write(chunk)
-                TotalSize += len(chunk)
+        async with self.Session.get(Url) as Response:
+            Response.raise_for_status()
+            async with aiofiles.open(OutPath, 'wb') as f:
+                async for chunk in Response.content.iter_chunked(int(ChunkSize)):
+                    if self.Stopped:
+                        return 0
+                    await f.write(chunk)
+                    TotalSize += len(chunk)
         return TotalSize
 
     async def Download(self, File: FileData) -> None:
@@ -501,7 +496,7 @@ class Downloader:
                         f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                     ) if not self.Stopped else None
             except Exception as Error:
-                if any(isinstance(Error, ExceptionType) for ExceptionType in HttpxExceptions + [BlockingIOError, RuntimeError, RetryError]):
+                if any(isinstance(Error, ExceptionType) for ExceptionType in AiohttpExceptions + [BlockingIOError, RuntimeError, RetryError]):
                     pass
                 else:
                     if not self.Stopped:
@@ -543,18 +538,23 @@ if __name__ == '__main__':
                 finally:
                     DownloadQueue.task_done()
 
-        Limits = httpx.Limits(max_connections=SemaphoreLimit*8, max_keepalive_connections=SemaphoreLimit*4, keepalive_expiry=30.0)
-        Transport = httpx.AsyncHTTPTransport(limits=Limits, retries=1, http2=True)
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout=TimeoutConfig, connect=30.0, read=TimeoutConfig, write=TimeoutConfig),
-            follow_redirects=True,
-            transport=Transport,
-            http2=True,
-            trust_env=True,
-            verify=False
-        ) as Client:
-            Fetch = Fetcher(Client, Log, ErrorLogger, DownloadQueue)
-            Download = Downloader(Client, Log, ErrorLogger, Fetch)
+        # Configure HTTP/2 Connector
+        Resolver = AsyncResolver(nameservers=['1.1.1.1', '1.0.0.1'])
+        TCPConnector = aiohttp.TCPConnector(
+            limit=SemaphoreLimit*8, 
+            limit_per_host=SemaphoreLimit*4,
+            resolver=Resolver,
+            ssl=False, 
+            enable_cleanup_closed=True, 
+            force_close=True
+        )
+        
+        Timeout = aiohttp.ClientTimeout(total=TimeoutConfig, connect=30.0, sock_connect=30.0, sock_read=TimeoutConfig)
+        
+        async with aiohttp.ClientSession(connector=TCPConnector, timeout=Timeout, 
+                                        trust_env=True, raise_for_status=False) as Session:
+            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
+            Download = Downloader(Session, Log, ErrorLogger, Fetch)
 
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
@@ -593,7 +593,7 @@ if __name__ == '__main__':
             Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based on {FileCount} files)')
 
     try:
-        asyncio.run(Main())
+        uvloop.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
         for File in TempDir.iterdir():
