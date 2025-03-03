@@ -206,6 +206,16 @@ class TaskTracker:
         self.Total = Counter()
         self.LastReportTime = {}
         self.ReportInterval = 10
+        self.DownloadStats = {
+            'Speed': 0,
+            'TotalBytes': 0,
+            'CurrentFile': '',
+            'CurrentFileSize': 0,
+            'Progress': 0.0,
+            'LastUpdateTime': time.time(),
+            'BytesLast': 0
+        }
+        self.StatusTask = None
     
     def Start(self, Category):
         TaskId = id(current_task())
@@ -217,13 +227,79 @@ class TaskTracker:
         if self.Active[Category] > 0:
             self.Active[Category] -= 1
             
-    def Report(self, Category, SampleRate=20):
+    def Report(self, Category):
         CurrentTime = time.time()
         LastTime = self.LastReportTime.get(Category, 0)
         
-        if random.random() < (1/SampleRate) or (CurrentTime - LastTime > self.ReportInterval):
+        if CurrentTime - LastTime > self.ReportInterval:
             self.LastReportTime[Category] = CurrentTime
             self.Log.info(f'Task Monitor: {Category} - Active: {self.Active[Category]} / Total: {self.Total[Category]}')
+
+    def UpdateDownloadStats(self, FileName='', FileSize=0, BytesDownloaded=0, IsComplete=False):
+        CurrentTime = time.time()
+        TimeSpan = CurrentTime - self.DownloadStats['LastUpdateTime']
+        
+        if FileName and FileSize > 0:
+            self.DownloadStats['CurrentFile'] = FileName
+            self.DownloadStats['CurrentFileSize'] = FileSize
+            
+        if BytesDownloaded > 0:
+            BytesDiff = BytesDownloaded - self.DownloadStats['BytesLast']
+            if TimeSpan > 0:
+                self.DownloadStats['Speed'] = BytesDiff / TimeSpan
+            self.DownloadStats['BytesLast'] = BytesDownloaded
+            self.DownloadStats['TotalBytes'] += BytesDiff
+            
+            if self.DownloadStats['CurrentFileSize'] > 0:
+                self.DownloadStats['Progress'] = min(100.0, (BytesDownloaded / self.DownloadStats['CurrentFileSize']) * 100)
+        
+        if IsComplete:
+            self.DownloadStats['CurrentFile'] = ''
+            self.DownloadStats['CurrentFileSize'] = 0
+            self.DownloadStats['Progress'] = 0.0
+            
+        self.DownloadStats['LastUpdateTime'] = CurrentTime
+
+    async def StatusPanel(self):
+        try:
+            while True:
+                SpeedHuman = await Humanize(self.DownloadStats['Speed']) + '/s'
+                TotalHuman = await Humanize(self.DownloadStats['TotalBytes'])
+                FileHuman = await Humanize(self.DownloadStats['CurrentFileSize'])
+                
+                StatusMsg = (
+                    f'Downloads: Active:{self.Active["Downloader"]} | '
+                    f'Total:{self.Total["Downloader"]} | '
+                    f'Files:{self.Total["FetchFile"]} | '
+                    f'Speed:{SpeedHuman} | '
+                    f'Downloaded:{TotalHuman}'
+                )
+                
+                if self.DownloadStats['CurrentFile']:
+                    FileName = Path(self.DownloadStats['CurrentFile']).name
+                    ProgressBar = '█' * int(self.DownloadStats['Progress'] / 5) + '░' * (20 - int(self.DownloadStats['Progress'] / 5))
+                    FileStatus = (
+                        f'Current: {FileName[:20]}... | '
+                        f'Size:{FileHuman} | '
+                        f'{ProgressBar} {self.DownloadStats["Progress"]:.1f}%'
+                    )
+                    self.Log.info(f'{StatusMsg}\n{FileStatus}')
+                else:
+                    self.Log.info(StatusMsg)
+                    
+                await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            pass
+        except Exception as Error:
+            self.Log.warning(f'Status Panel Error: {Error}')
+
+    def StartStatusPanel(self):
+        if not self.StatusTask or self.StatusTask.done():
+            self.StatusTask = asyncio.create_task(self.StatusPanel())
+            
+    def StopStatusPanel(self):
+        if self.StatusTask and not self.StatusTask.done():
+            self.StatusTask.cancel()
 
 # Fetcher Class
 class Fetcher:
@@ -484,15 +560,22 @@ class Downloader:
         TaskId = self.TaskTracker.Start('FetchFile')
         try:
             TotalSize = 0
+            self.TaskTracker.UpdateDownloadStats(FileName=str(OutPath), FileSize=0)
+            
             async with self.Session.get(Url) as Response:
                 Response.raise_for_status()
+                ContentLength = Response.content_length or 0
+                self.TaskTracker.UpdateDownloadStats(FileSize=ContentLength)
+                
                 async with aiofiles.open(OutPath, 'wb') as f:
                     async for chunk in Response.content.iter_chunked(int(ChunkSize)):
                         if self.Stopped:
                             return 0
                         await f.write(chunk)
                         TotalSize += len(chunk)
+                        self.TaskTracker.UpdateDownloadStats(BytesDownloaded=TotalSize)
 
+            self.TaskTracker.UpdateDownloadStats(IsComplete=True)
             self.TaskTracker.Report('FetchFile')
             return TotalSize
         finally:
@@ -618,35 +701,44 @@ if __name__ == '__main__':
                                         trust_env=True, raise_for_status=False) as Session:
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
+            
+            # Start status panel
+            Fetch.TaskTracker.StartStatusPanel()
 
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
                 for _ in range(SemaphoreLimit)
             ]
-            Log.info('Creating Directories...')
-            await Fetch.CreateDirectories()
-            Log.info('Looking Up Hashes...')
-            await Fetch.LookupHashes()
-            Log.info('Fetching Favorites...')
-            await Fetch.Favorites()
+            
+            try:
+                Log.info('Creating Directories...')
+                await Fetch.CreateDirectories()
+                Log.info('Looking Up Hashes...')
+                await Fetch.LookupHashes()
+                Log.info('Fetching Favorites...')
+                await Fetch.Favorites()
 
-            AllCreators = []
-            for Platform in Fetch.Data:
-                for Service in Fetch.Data[Platform]['Creators']:
-                    AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
+                AllCreators = []
+                for Platform in Fetch.Data:
+                    for Service in Fetch.Data[Platform]['Creators']:
+                        AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
 
-            random.shuffle(AllCreators)
+                random.shuffle(AllCreators)
 
-            for Creator in AllCreators:
-                await Fetch.Posts(Creator)
+                for Creator in AllCreators:
+                    await Fetch.Posts(Creator)
 
-            Fetch.Log.info(f'Fetched {Fetch.TotalFiles} Files')
-            Download.TotalFiles = Fetch.TotalFiles
+                Fetch.Log.info(f'Fetched {Fetch.TotalFiles} Files')
+                Download.TotalFiles = Fetch.TotalFiles
 
-            await DownloadQueue.join()
-            for Task in DownloadTasks:
-                Task.cancel()
-            await asyncio.gather(*DownloadTasks, return_exceptions=True)
+                await DownloadQueue.join()
+            finally:
+                # Stop status panel
+                Fetch.TaskTracker.StopStatusPanel()
+                
+                for Task in DownloadTasks:
+                    Task.cancel()
+                await asyncio.gather(*DownloadTasks, return_exceptions=True)
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
