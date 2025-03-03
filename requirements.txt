@@ -4,6 +4,7 @@
 
 rich
 aiodns
+cython
 uvloop
 orjson
 aiohttp
