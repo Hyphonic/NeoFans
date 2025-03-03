@@ -7,9 +7,9 @@ aiodns
 uvloop
 orjson
 aiohttp
-cchardet
 psutil
 aiofiles
 tenacity
 python-dotenv
 rclone-python
+charset-normalizer
