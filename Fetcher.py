@@ -17,12 +17,15 @@ import aiodns
 
 # Default Imports
 from dataclasses import dataclass
+from asyncio import current_task
 from typing import Union, Tuple
+from collections import Counter
 from asyncio import Queue
 from pathlib import Path
 import shutil
 import random
 import math
+import time
 import sys
 import os
 import gc
@@ -195,6 +198,33 @@ class LowDiskSpace(Exception):
 
 Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed. Transfers Will Not Work!')
 
+# Task Tracker Class
+class TaskTracker:
+    def __init__(self, Log):
+        self.Log = Log
+        self.Active = Counter()
+        self.Total = Counter()
+        self.LastReportTime = {}
+        self.ReportInterval = 10
+    
+    def Start(self, Category):
+        TaskId = id(current_task())
+        self.Active[Category] += 1
+        self.Total[Category] += 1
+        return TaskId
+        
+    def End(self, Category, TaskId=None):
+        if self.Active[Category] > 0:
+            self.Active[Category] -= 1
+            
+    def Report(self, Category, SampleRate=20):
+        CurrentTime = time.time()
+        LastTime = self.LastReportTime.get(Category, 0)
+        
+        if random.random() < (1/SampleRate) or (CurrentTime - LastTime > self.ReportInterval):
+            self.LastReportTime[Category] = CurrentTime
+            self.Log.info(f'Task Monitor: {Category} - Active: {self.Active[Category]} / Total: {self.Total[Category]}')
+
 # Fetcher Class
 class Fetcher:
     def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
@@ -205,6 +235,7 @@ class Fetcher:
         self.DownloadQueue = DownloadQueue
         self.Stopped = False
         self.Hashes = set()
+        self.TaskTracker = TaskTracker(Log)
         self.Data = {
             'coomer':
                 {
@@ -267,17 +298,24 @@ class Fetcher:
         HashLookupTasks = []
 
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
+            TaskId = self.TaskTracker.Start('HashLookup')
             async with Semaphore:
-                self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
                 try:
-                    Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
-                    for File in [File['Name'] for File in Files]:
-                        Hash = Path(File).stem
-                        if len(Hash) >= 30:
-                            ProcessedHashes.add(Hash[:30])
-                except RcloneException as Error:
-                    self.ErrorLogger(Error)
-                    self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
+                    self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
+                    try:
+                        Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
+                        for File in [File['Name'] for File in Files]:
+                            Hash = Path(File).stem
+                            if len(Hash) >= 30:
+                                ProcessedHashes.add(Hash[:30])
+                    except RcloneException as Error:
+                        self.ErrorLogger(Error)
+                        self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
+                    
+                    # 1 in 20 chance to report active tasks
+                    self.TaskTracker.Report('HashLookup')
+                finally:
+                    self.TaskTracker.End('HashLookup', TaskId)
 
         CreatorTasks = []
         for Platform in self.Data:
@@ -295,12 +333,6 @@ class Fetcher:
                 asyncio.create_task(ProcessCreator(Directory, CreatorName))
                 for Directory, CreatorName in CreatorTasks
             ]
-            await asyncio.gather(*HashLookupTasks)
-            self.Hashes = ProcessedHashes
-            self.Log.info(f'Loaded {len(self.Hashes)} Valid Hashes From Remote Storage')
-
-        if HashLookupTasks:
-            self.Log.info(f'Looking Up Hashes From {len(HashLookupTasks)} Creators...')
             await asyncio.gather(*HashLookupTasks)
             self.Hashes = ProcessedHashes
             self.Log.info(f'Loaded {len(self.Hashes)} Valid Hashes From Remote Storage')
@@ -435,27 +467,38 @@ class Downloader:
         self.Fetcher = Fetcher
         self.Hashes = Fetcher.Hashes
         self.InitialFreeSpace = shutil.disk_usage('.').free
+        self.TaskTracker = Fetcher.TaskTracker
 
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
-        TotalSize = 0
-        async with self.Session.get(Url) as Response:
-            Response.raise_for_status()
-            async with aiofiles.open(OutPath, 'wb') as f:
-                async for chunk in Response.content.iter_chunked(int(ChunkSize)):
-                    if self.Stopped:
-                        return 0
-                    await f.write(chunk)
-                    TotalSize += len(chunk)
-        return TotalSize
+        TaskId = self.TaskTracker.Start('FetchFile')
+        try:
+            TotalSize = 0
+            async with self.Session.get(Url) as Response:
+                Response.raise_for_status()
+                async with aiofiles.open(OutPath, 'wb') as f:
+                    async for chunk in Response.content.iter_chunked(int(ChunkSize)):
+                        if self.Stopped:
+                            return 0
+                        await f.write(chunk)
+                        TotalSize += len(chunk)
+
+            self.TaskTracker.Report('FetchFile')
+            return TotalSize
+        finally:
+            self.TaskTracker.End('FetchFile', TaskId)
 
     async def Download(self, File: FileData) -> None:
         if self.Stopped:
             return
 
+        TaskId = self.TaskTracker.Start('Downloader')
+
         if random.random() < 0.1:
             gc.collect()
             self.Log.info(f'Free Memory: {await Humanize(psutil.virtual_memory().available)}')
+        
+        self.TaskTracker.Report('Downloader')
 
         async with self.Semaphore:
             try:
@@ -513,6 +556,9 @@ class Downloader:
                         SpacePercentage = await self.CalculateSpacePercentage()
                         QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
                         self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
+            
+            finally:
+                self.TaskTracker.End('Downloader', TaskId)
 
     async def CalculateSpacePercentage(self) -> str:
         CurrentFreeSpace = shutil.disk_usage('.').free
