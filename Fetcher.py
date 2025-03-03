@@ -262,33 +262,42 @@ class Fetcher:
                     self.Log.info(f'Created Missing Directory {Directory} On Remote Storage')
 
     async def LookupHashes(self) -> None:
-        HashLookupTasks = []
         ProcessedHashes = set()
+        Semaphore = asyncio.Semaphore(SemaphoreLimit)
+        HashLookupTasks = []
 
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
-            self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
-            try:
-                Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
-                for File in [File['Name'] for File in Files]:
-                    Hash = Path(File).stem
-                    if len(Hash) >= 30:
-                        ProcessedHashes.add(Hash[:30])
-            except RcloneException as Error:
-                self.ErrorLogger(Error)
-                self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
+            async with Semaphore:
+                self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
+                try:
+                    Files = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}/{CreatorName}')
+                    for File in [File['Name'] for File in Files]:
+                        Hash = Path(File).stem
+                        if len(Hash) >= 30:
+                            ProcessedHashes.add(Hash[:30])
+                except RcloneException as Error:
+                    self.ErrorLogger(Error)
+                    self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
 
+        CreatorTasks = []
         for Platform in self.Data:
             for Directory in self.Data[Platform]['Directory'].values():
                 try:
                     Creators = rclone.ls(f'{rclone.get_remotes()[-1]}{Directory}')
                     for Creator in Creators:
-                        HashLookupTasks.append(
-                            asyncio.create_task(
-                                ProcessCreator(Directory, Creator['Name'])
-                            )
-                        )
+                        CreatorTasks.append((Directory, Creator['Name']))
                 except RcloneException:
                     self.Log.warning(f'Failed To Lookup Hashes For {Directory}')
+        
+        if CreatorTasks:
+            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {SemaphoreLimit} Parallel Workers...')
+            HashLookupTasks = [
+                asyncio.create_task(ProcessCreator(Directory, CreatorName))
+                for Directory, CreatorName in CreatorTasks
+            ]
+            await asyncio.gather(*HashLookupTasks)
+            self.Hashes = ProcessedHashes
+            self.Log.info(f'Loaded {len(self.Hashes)} Valid Hashes From Remote Storage')
 
         if HashLookupTasks:
             self.Log.info(f'Looking Up Hashes From {len(HashLookupTasks)} Creators...')
@@ -539,14 +548,12 @@ if __name__ == '__main__':
                     DownloadQueue.task_done()
 
         # Configure HTTP/2 Connector
-        Resolver = AsyncResolver(nameservers=['1.1.1.1', '1.0.0.1'])
-        TCPConnector = aiohttp.TCPConnector(
+        #Resolver = AsyncResolver(nameservers=['1.1.1.1', '1.0.0.1'])
+        TCPConnector = aiohttp.TCPConnector( # Add: resolver=Resolver,
             limit=SemaphoreLimit*8, 
             limit_per_host=SemaphoreLimit*4,
-            resolver=Resolver,
             ssl=False, 
-            enable_cleanup_closed=True, 
-            force_close=True
+            enable_cleanup_closed=True
         )
         
         Timeout = aiohttp.ClientTimeout(total=TimeoutConfig, connect=30.0, sock_connect=30.0, sock_read=TimeoutConfig)
