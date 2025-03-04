@@ -3,33 +3,33 @@
 # Rclone Configuration - https://rclone.org/docs/
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
 from rclone_python.utils import RcloneException
-from aiohttp.resolver import AsyncResolver
 from rclone_python import rclone
 from dotenv import load_dotenv
 import aiofiles.os
 import aiofiles
 import asyncio
-import psutil
 import aiohttp
-import uvloop
 import orjson
-import aiodns
 
 # Default Imports
 from dataclasses import dataclass
-from asyncio import current_task
 from typing import Union, Tuple
-from collections import Counter
+from collections import deque
+from platform import system
 from asyncio import Queue
 from pathlib import Path
+import statistics
 import shutil
 import random
 import math
-import time
 import sys
 import os
 import gc
 import re
+
+# Special Imports For Linux Systems
+if system() == 'Linux':
+    import uvloop
 
 # Logging
 from rich.console import Console as RichConsole
@@ -40,17 +40,15 @@ from rich.theme import Theme
 import logging
 
 # Config
-LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
-SemaphoreLimit = 16
-QueueThresholds = [0.2, 0.8] # Pause at 20%, Resume at 80%
-QueueLimit = 1000
+QueueThresholds = [.2, .8]
+QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
 TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
+LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 rclone.set_log_level('ERROR')
-
 TimeoutConfig = 300.0
 
 AiohttpExceptions = [
@@ -84,7 +82,7 @@ class DownloadHighlighter(RegexHighlighter):
     base_style = 'downloader.'
     highlights = [
         r'(?P<hash>[a-f0-9]{30})',
-        r'(?P<status>Downloaded|Skipping|Failed To Move)',
+        r'(?P<status>Downloaded|Skipping|Failed To Move|Speed|Files|Total|Downloads)',
         r'(?P<time>[\d.]+s)',
         r'(?P<file_k>[\d.]+ KB)',
         r'(?P<file_m>[\d.]+ MB)',
@@ -198,109 +196,6 @@ class LowDiskSpace(Exception):
 
 Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed. Transfers Will Not Work!')
 
-# Task Tracker Class
-class TaskTracker:
-    def __init__(self, Log):
-        self.Log = Log
-        self.Active = Counter()
-        self.Total = Counter()
-        self.LastReportTime = {}
-        self.ReportInterval = 10
-        self.DownloadStats = {
-            'Speed': 0,
-            'TotalBytes': 0,
-            'CurrentFile': '',
-            'CurrentFileSize': 0,
-            'Progress': 0.0,
-            'LastUpdateTime': time.time(),
-            'BytesLast': 0
-        }
-        self.StatusTask = None
-    
-    def Start(self, Category):
-        TaskId = id(current_task())
-        self.Active[Category] += 1
-        self.Total[Category] += 1
-        return TaskId
-        
-    def End(self, Category, TaskId=None):
-        if self.Active[Category] > 0:
-            self.Active[Category] -= 1
-            
-    def Report(self, Category):
-        CurrentTime = time.time()
-        LastTime = self.LastReportTime.get(Category, 0)
-        
-        if CurrentTime - LastTime > self.ReportInterval:
-            self.LastReportTime[Category] = CurrentTime
-            self.Log.info(f'Task Monitor: {Category} - Active: {self.Active[Category]} / Total: {self.Total[Category]}')
-
-    def UpdateDownloadStats(self, FileName='', FileSize=0, BytesDownloaded=0, IsComplete=False):
-        CurrentTime = time.time()
-        TimeSpan = CurrentTime - self.DownloadStats['LastUpdateTime']
-        
-        if FileName and FileSize > 0:
-            self.DownloadStats['CurrentFile'] = FileName
-            self.DownloadStats['CurrentFileSize'] = FileSize
-            
-        if BytesDownloaded > 0:
-            BytesDiff = BytesDownloaded - self.DownloadStats['BytesLast']
-            if TimeSpan > 0:
-                self.DownloadStats['Speed'] = BytesDiff / TimeSpan
-            self.DownloadStats['BytesLast'] = BytesDownloaded
-            self.DownloadStats['TotalBytes'] += BytesDiff
-            
-            if self.DownloadStats['CurrentFileSize'] > 0:
-                self.DownloadStats['Progress'] = min(100.0, (BytesDownloaded / self.DownloadStats['CurrentFileSize']) * 100)
-        
-        if IsComplete:
-            self.DownloadStats['CurrentFile'] = ''
-            self.DownloadStats['CurrentFileSize'] = 0
-            self.DownloadStats['Progress'] = 0.0
-            
-        self.DownloadStats['LastUpdateTime'] = CurrentTime
-
-    async def StatusPanel(self):
-        try:
-            while True:
-                SpeedHuman = await Humanize(self.DownloadStats['Speed']) + '/s'
-                TotalHuman = await Humanize(self.DownloadStats['TotalBytes'])
-                FileHuman = await Humanize(self.DownloadStats['CurrentFileSize'])
-                
-                StatusMsg = (
-                    f'Downloads: Active:{self.Active["Downloader"]} | '
-                    f'Total:{self.Total["Downloader"]} | '
-                    f'Files:{self.Total["FetchFile"]} | '
-                    f'Speed:{SpeedHuman} | '
-                    f'Downloaded:{TotalHuman}'
-                )
-                
-                if self.DownloadStats['CurrentFile']:
-                    FileName = Path(self.DownloadStats['CurrentFile']).name
-                    ProgressBar = '█' * int(self.DownloadStats['Progress'] / 5) + '░' * (20 - int(self.DownloadStats['Progress'] / 5))
-                    FileStatus = (
-                        f'Current: {FileName[:20]}... | '
-                        f'Size:{FileHuman} | '
-                        f'{ProgressBar} {self.DownloadStats["Progress"]:.1f}%'
-                    )
-                    self.Log.info(f'{StatusMsg}\n{FileStatus}')
-                else:
-                    self.Log.info(StatusMsg)
-                    
-                await asyncio.sleep(2)
-        except asyncio.CancelledError:
-            pass
-        except Exception as Error:
-            self.Log.warning(f'Status Panel Error: {Error}')
-
-    def StartStatusPanel(self):
-        if not self.StatusTask or self.StatusTask.done():
-            self.StatusTask = asyncio.create_task(self.StatusPanel())
-            
-    def StopStatusPanel(self):
-        if self.StatusTask and not self.StatusTask.done():
-            self.StatusTask.cancel()
-
 # Fetcher Class
 class Fetcher:
     def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, DownloadQueue: Queue) -> None:
@@ -311,7 +206,6 @@ class Fetcher:
         self.DownloadQueue = DownloadQueue
         self.Stopped = False
         self.Hashes = set()
-        self.TaskTracker = TaskTracker(Log)
         self.Data = {
             'coomer':
                 {
@@ -368,15 +262,14 @@ class Fetcher:
                     rclone.mkdir(f'{rclone.get_remotes()[-1]}{Directory}')
                     self.Log.info(f'Created Missing Directory {Directory} On Remote Storage')
 
-    async def LookupHashes(self) -> None:
+    async def LookupHashes(self, HashLookupLimit=16) -> None:
         ProcessedHashes = set()
-        Semaphore = asyncio.Semaphore(SemaphoreLimit)
+        Semaphore = asyncio.Semaphore(HashLookupLimit)
         
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
-            TaskId = self.TaskTracker.Start('HashLookup')
             try:
                 async with Semaphore:
-                    self.Log.info(f'Looking Up Hashes For {CreatorName} From {Directory}...')
+                    self.Log.debug(f'Looking Up Hashes For {CreatorName} From {Directory}...')
                     try:
                         Files = await asyncio.to_thread(
                             rclone.ls, 
@@ -390,9 +283,8 @@ class Fetcher:
                         self.ErrorLogger(Error)
                         self.Log.warning(f'Failed To Lookup Hashes For {CreatorName}')
                     
-                    self.TaskTracker.Report('HashLookup')
-            finally:
-                self.TaskTracker.End('HashLookup', TaskId)
+            except Exception as Error:
+                self.ErrorLogger(Error)
 
         CreatorTasks = []
         for Platform in self.Data:
@@ -408,12 +300,12 @@ class Fetcher:
                     self.Log.warning(f'Failed To Lookup Hashes For {Directory}')
         
         if CreatorTasks:
-            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {SemaphoreLimit} Parallel Workers...')
+            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {HashLookupLimit} Parallel Workers...')
             
             Tasks = []
             for Directory, CreatorName in CreatorTasks:
                 Tasks.append(asyncio.create_task(ProcessCreator(Directory, CreatorName)))
-                if len(Tasks) >= SemaphoreLimit * 4:
+                if len(Tasks) >= HashLookupLimit * 4:
                     await asyncio.gather(*Tasks)
                     Tasks = []
             
@@ -454,7 +346,7 @@ class Fetcher:
             Tasks.append(Fetch(Platform, self.Data[Platform]['BaseUrl']))
 
         await asyncio.gather(*Tasks)
-        self.Log.info(f'Fetched {Counter} Favorites')
+        self.Log.debug(f'Fetched {Counter} Favorites')
 
     async def Posts(self, Creator: CreatorData) -> None:
         TotalCounter = 0
@@ -543,7 +435,7 @@ class Fetcher:
 
 # Downloader Class
 class Downloader:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher) -> None:
+    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher, SemaphoreLimit: int = 16) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
@@ -553,19 +445,14 @@ class Downloader:
         self.Fetcher = Fetcher
         self.Hashes = Fetcher.Hashes
         self.InitialFreeSpace = shutil.disk_usage('.').free
-        self.TaskTracker = Fetcher.TaskTracker
 
     @retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
-        TaskId = self.TaskTracker.Start('FetchFile')
         try:
             TotalSize = 0
-            self.TaskTracker.UpdateDownloadStats(FileName=str(OutPath), FileSize=0)
             
             async with self.Session.get(Url) as Response:
                 Response.raise_for_status()
-                ContentLength = Response.content_length or 0
-                self.TaskTracker.UpdateDownloadStats(FileSize=ContentLength)
                 
                 async with aiofiles.open(OutPath, 'wb') as f:
                     async for chunk in Response.content.iter_chunked(int(ChunkSize)):
@@ -573,25 +460,16 @@ class Downloader:
                             return 0
                         await f.write(chunk)
                         TotalSize += len(chunk)
-                        self.TaskTracker.UpdateDownloadStats(BytesDownloaded=TotalSize)
-
-            self.TaskTracker.UpdateDownloadStats(IsComplete=True)
-            self.TaskTracker.Report('FetchFile')
             return TotalSize
-        finally:
-            self.TaskTracker.End('FetchFile', TaskId)
+        except Exception as Error:
+            self.ErrorLogger(Error)
 
-    async def Download(self, File: FileData) -> None:
+    async def Download(self, File: FileData) -> int:
         if self.Stopped:
-            return
-
-        TaskId = self.TaskTracker.Start('Downloader')
+            return 0
 
         if random.random() < 0.1:
             gc.collect()
-            self.Log.info(f'Free Memory: {await Humanize(psutil.virtual_memory().available)}')
-        
-        self.TaskTracker.Report('Downloader')
 
         async with self.Semaphore:
             try:
@@ -601,7 +479,7 @@ class Downloader:
                     self.Log.warning(
                         f'{QueueStatus} ({SpacePercentage}) Skipping {File.Hash[:30]}... '
                     ) if not self.Stopped else None
-                    return
+                    return 0
 
                 if shutil.disk_usage('.').free < LowDiskSpaceThreshold:
                     self.Log.warning('Low Disk Space!') if not self.Stopped else None
@@ -631,7 +509,7 @@ class Downloader:
                         SpacePercentage = await self.CalculateSpacePercentage()
                         QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
                         self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Failed To Move {File.Hash[:30]}...')
-                        pass
+                        return 0
                     self.Hashes.add(str(File.Hash))
                     ElapsedTime = asyncio.get_event_loop().time() - StartTime
                     SpacePercentage = await self.CalculateSpacePercentage()
@@ -640,6 +518,8 @@ class Downloader:
                         f'{QueueStatus} ({SpacePercentage}) Downloaded {File.Hash[:30]}... '
                         f'({await Humanize(FileSize)} in {ElapsedTime:.1f}s)'
                     ) if not self.Stopped else None
+                    return FileSize
+                return 0
             except Exception as Error:
                 if any(isinstance(Error, ExceptionType) for ExceptionType in AiohttpExceptions + [BlockingIOError, RuntimeError, RetryError]):
                     pass
@@ -649,9 +529,7 @@ class Downloader:
                         SpacePercentage = await self.CalculateSpacePercentage()
                         QueueStatus = f'[{self.Fetcher.DownloadQueue.qsize()}/{QueueLimit}]'
                         self.Log.warning(f'{QueueStatus} ({SpacePercentage}) Failed To Download {File.Hash[:30]}... ')
-            
-            finally:
-                self.TaskTracker.End('Downloader', TaskId)
+                return 0
 
     async def CalculateSpacePercentage(self) -> str:
         CurrentFreeSpace = shutil.disk_usage('.').free
@@ -675,22 +553,74 @@ if __name__ == '__main__':
     async def Main() -> None:
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
+        
+        # Smart configuration with defaults
+        FileSizeHistory = deque(maxlen=100)
+        
+        # Default semaphore limits - will be adjusted dynamically
+        MinSemaphore = 8  # Default min threads
+        MaxSemaphore = 24  # Default max threads
+        DefaultSemaphore = 16  # Starting value
+        CurrentSemaphoreLimit = DefaultSemaphore
+        
+        # Default creator fetch limits - will adjust based on queue
+        MinCreatorFetches = 1
+        MaxCreatorFetches = 5
+        
+        async def AdjustSemaphoreLimit():
+            nonlocal CurrentSemaphoreLimit, MinSemaphore, MaxSemaphore
+            while True:
+                await asyncio.sleep(30)  # Adjust every 30 seconds
+                
+                # Smart default if we don't have enough data yet
+                if len(FileSizeHistory) < 10:
+                    # Keep current setting until we have enough data
+                    continue
+                    
+                MedianSize = statistics.median(FileSizeHistory)
+                
+                # Auto-adjust min/max semaphore limits based on file size patterns
+                if all(size < 1e6 for size in list(FileSizeHistory)[-10:]):
+                    # If recent files are all small, increase max parallelism
+                    MaxSemaphore = min(32, MaxSemaphore + 1)
+                elif all(Size > 10e6 for Size in list(FileSizeHistory)[-10:]):
+                    # If recent files are all large, decrease min parallelism
+                    MinSemaphore = max(4, MinSemaphore - 1)
+                
+                # Calculate new limit based on file sizes
+                if MedianSize < 1e6:  # < 1MB
+                    NewLimit = MaxSemaphore
+                elif MedianSize > 20e6:  # > 20MB
+                    NewLimit = MinSemaphore
+                else:
+                    # Linear scale between min and max
+                    Factor = 1 - ((MedianSize - 1e6) / (19e6))
+                    RangeSize = MaxSemaphore - MinSemaphore
+                    NewLimit = int(MinSemaphore + (Factor * RangeSize))
+                    
+                # Apply change if significant
+                if abs(NewLimit - CurrentSemaphoreLimit) > 1:
+                    Log.info(f'Adjusting Download Threads From {CurrentSemaphoreLimit} To {NewLimit} Based On Median File Size')
+                    CurrentSemaphoreLimit = NewLimit
+                    # Update the semaphore object
+                    Download.Semaphore = asyncio.Semaphore(CurrentSemaphoreLimit)
 
         async def ProcessDownloads(Download: Downloader):
             while True:
                 File = await DownloadQueue.get()
                 try:
-                    await Download.Download(File)
+                    FileSize = await Download.Download(File)
+                    if FileSize:
+                        FileSizeHistory.append(FileSize)
                 except Exception as Error:
                     ErrorLogger(Error)
                 finally:
                     DownloadQueue.task_done()
-
-        # Configure HTTP/2 Connector
-        #Resolver = AsyncResolver(nameservers=['1.1.1.1', '1.0.0.1'])
-        TCPConnector = aiohttp.TCPConnector( # Add: resolver=Resolver,
-            limit=SemaphoreLimit*8, 
-            limit_per_host=SemaphoreLimit*4,
+        
+        # Configure HTTP/2 Connector with default settings
+        TCPConnector = aiohttp.TCPConnector(
+            limit=DefaultSemaphore*8, 
+            limit_per_host=DefaultSemaphore*4,
             ssl=False, 
             enable_cleanup_closed=True
         )
@@ -699,16 +629,20 @@ if __name__ == '__main__':
         
         async with aiohttp.ClientSession(connector=TCPConnector, timeout=Timeout, 
                                         trust_env=True, raise_for_status=False) as Session:
-            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
+            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue, DefaultSemaphore)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
-            # Start status panel
-            Fetch.TaskTracker.StartStatusPanel()
-
+            # Create dynamic semaphore for downloader
+            Download.Semaphore = asyncio.Semaphore(CurrentSemaphoreLimit)
+            
+            # Start the downloader tasks - create more than needed for flexibility
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
-                for _ in range(SemaphoreLimit)
+                for _ in range(MaxSemaphore * 2)  # Create more tasks than semaphore allows
             ]
+            
+            # Start the semaphore adjustment task
+            SemaphoreAdjustTask = asyncio.create_task(AdjustSemaphoreLimit())
             
             try:
                 Log.info('Creating Directories...')
@@ -724,31 +658,83 @@ if __name__ == '__main__':
                         AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
 
                 random.shuffle(AllCreators)
-
-                for Creator in AllCreators:
-                    await Fetch.Posts(Creator)
-
+                
+                # Background Fetch Function
+                async def BackgroundFetch():
+                    CreatorQueue = asyncio.Queue()
+                    for Creator in AllCreators:
+                        await CreatorQueue.put(Creator)
+                    
+                    async def FetchCreatorPosts():
+                        nonlocal MinCreatorFetches, MaxCreatorFetches
+                        while not CreatorQueue.empty():
+                            # Dynamically adjust parallel creator fetches based on queue size
+                            QueuePercentage = DownloadQueue.qsize() / DownloadQueue.maxsize
+                            if QueuePercentage > QueueThresholds[1]:
+                                await asyncio.sleep(5)  # Queue high, wait a bit
+                                continue
+                                
+                            # Calculate how many creators to fetch in parallel based on queue size
+                            # Lower queue = more parallel fetches
+                            AvailableFraction = 1 - (QueuePercentage / QueueThresholds[1])
+                            ParallelFetches = max(
+                                MinCreatorFetches,
+                                min(MaxCreatorFetches, 
+                                    int(AvailableFraction * MaxCreatorFetches))
+                            )
+                            
+                            # Adjust the number of active fetcher tasks based on ParallelFetches
+                            # (This is the missing part where ParallelFetches is used)
+                            if len([t for t in FetcherTasks if not t.done()]) > ParallelFetches:
+                                # Too many active tasks, wait a bit
+                                await asyncio.sleep(1)
+                                continue
+                                
+                            Creator = await CreatorQueue.get()
+                            try:
+                                await Fetch.Posts(Creator)
+                            except Exception as Error:
+                                ErrorLogger(Error)
+                            finally:
+                                CreatorQueue.task_done()
+                    
+                    # Create background fetcher tasks
+                    FetcherTasks = [
+                        asyncio.create_task(FetchCreatorPosts())
+                        for _ in range(MaxCreatorFetches)
+                    ]
+                    
+                    try:
+                        await CreatorQueue.join()
+                    finally:
+                        for task in FetcherTasks:
+                            task.cancel()
+                        await asyncio.gather(*FetcherTasks, return_exceptions=True)
+                
+                # Start background fetching in parallel with downloads
+                backgroundTask = asyncio.create_task(BackgroundFetch())
+                
+                # Wait for all tasks to complete
+                await asyncio.gather(backgroundTask, DownloadQueue.join())
+                
                 Fetch.Log.info(f'Fetched {Fetch.TotalFiles} Files')
                 Download.TotalFiles = Fetch.TotalFiles
-
-                await DownloadQueue.join()
-            finally:
-                # Stop status panel
-                Fetch.TaskTracker.StopStatusPanel()
                 
+            finally:
+                SemaphoreAdjustTask.cancel()
                 for Task in DownloadTasks:
                     Task.cancel()
-                await asyncio.gather(*DownloadTasks, return_exceptions=True)
+                await asyncio.gather(*DownloadTasks, SemaphoreAdjustTask, return_exceptions=True)
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
 
             async with aiofiles.open('Data/Transfers.txt', 'w') as F:
                 await F.write(str(OptimalTransfers))
-            Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based on {FileCount} files)')
+            Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based On {FileCount} Files)')
 
     try:
-        uvloop.run(Main())
+        uvloop.run(Main()) if system() == 'Windows' else asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
         for File in TempDir.iterdir():
