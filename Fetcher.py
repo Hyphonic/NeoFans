@@ -267,7 +267,7 @@ class Fetcher:
 
     async def LookupHashes(self) -> None:
         ProcessedHashes = set()
-        NewSemaphoreLimit = SemaphoreLimit // 2
+        NewSemaphoreLimit = min(SemaphoreLimit // 2, 2)
         Semaphore = asyncio.Semaphore(NewSemaphoreLimit)
         
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
