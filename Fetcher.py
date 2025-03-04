@@ -41,7 +41,7 @@ import logging
 
 # Config
 QueueThresholds = [.2, .8]
-SemaphoreLimit = 16
+SemaphoreLimit = 1
 QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
@@ -353,7 +353,7 @@ class Fetcher:
         self.Log.debug(f'Fetched {Counter} Favorites')
 
     async def Posts(self, Creator: CreatorData) -> None:
-        TotalCounter = 0
+        CurrentCounter = 0
         NewCounter = 0
         SkippedCounter = 0
         Page = StartingPage
@@ -364,8 +364,9 @@ class Fetcher:
 
         @retry(**RetryConfig)
         async def Fetch(Creator: CreatorData) -> None:
-            nonlocal TotalCounter, NewCounter, SkippedCounter, Page
+            nonlocal CurrentCounter, NewCounter, SkippedCounter, Page
             while not self.Stopped:
+                CurrentCounter = 0
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
@@ -386,7 +387,7 @@ class Fetcher:
                             for Post in Posts:
                                 if Post.get('file') and Post['file'].get('path'):
                                     FilePath = Path(Post['file']['path'])
-                                    TotalCounter += 1
+                                    CurrentCounter += 1
 
                                     if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                         FileInfo = FileData(
@@ -411,7 +412,7 @@ class Fetcher:
                                 for Attachment in Post.get('attachments', []):
                                     if Attachment.get('path'):
                                         FilePath = Path(Attachment['path'])
-                                        TotalCounter += 1
+                                        CurrentCounter += 1
 
                                         if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
                                             FileInfo = FileData(
@@ -427,6 +428,7 @@ class Fetcher:
                                             self.TotalFiles += 1
                                         else:
                                             SkippedCounter += 1
+                            self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page}')
                             Page += 1
                 except Exception as Error:
                     self.ErrorLogger(Error)
