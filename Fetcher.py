@@ -256,9 +256,6 @@ class Fetcher:
                     }
                 }
             }
-    
-    async def ProcessCreator(self, Creator: CreatorData) -> None:
-        await self.Posts(Creator)
 
     async def CreateDirectories(self) -> None:
         Directories = rclone.ls(f'{rclone.get_remotes()[-1]}')
@@ -652,40 +649,11 @@ if __name__ == '__main__':
                         AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
 
                 random.shuffle(AllCreators)
-                
-                CreatorTasks = []
-                CreatorsSemaphore = asyncio.Semaphore(2)
-                
-                async def ProcessCreatorWithSemaphore(Creator: CreatorData):
-                    async with CreatorsSemaphore:
-                        await Fetch.ProcessCreator(Creator)
-                        if Download.Stopped or Fetch.Stopped:
-                            return
 
                 for Creator in AllCreators:
                     if Fetch.Stopped:
                         break
-                    Task = asyncio.create_task(ProcessCreatorWithSemaphore(Creator))
-                    CreatorTasks.append(Task)
-                
-                InitialWaitTime = 2
-                if not DownloadQueue.empty():
-                    Log.info(f'Initial Queue Size: {DownloadQueue.qsize()}, Starting Downloads')
-                else:
-                    Log.info(f'Waiting {InitialWaitTime}s For Queue To Be Populated...')
-                    await asyncio.sleep(InitialWaitTime)
-                
-                try:
-                    RunningTasks = asyncio.gather(*CreatorTasks)
-                    await asyncio.wait_for(RunningTasks, None)
-                except asyncio.CancelledError:
-                    Log.info('Creator Tasks Cancelled')
-                except Exception as Error:
-                    ErrorLogger(Error)
-                
-                if DownloadQueue.qsize() > 0:
-                    Log.info(f'Waiting For {DownloadQueue.qsize()} Downloads To Complete...')
-                    await DownloadQueue.join()
+                    await Fetch.Posts(Creator)
                 
                 Download.TotalFiles = Fetch.TotalFiles
                 
@@ -693,15 +661,10 @@ if __name__ == '__main__':
                 Log.info('Shutting Down Tasks...')
                 ConnectionsRecycler.cancel()
                 
-                for Task in CreatorTasks:
-                    if not Task.done():
-                        Task.cancel()
-                
                 for Task in DownloadTasks:
                     Task.cancel()
                 
-                await asyncio.gather(*DownloadTasks, ConnectionsRecycler, 
-                                   *CreatorTasks, return_exceptions=True)
+                await asyncio.gather(*DownloadTasks, ConnectionsRecycler, return_exceptions=True)
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
