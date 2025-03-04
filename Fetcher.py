@@ -340,7 +340,7 @@ class Fetcher:
                         Counter += 1
             except Exception as Error:
                 self.ErrorLogger(Error)
-                self.Log.warning(f'Failed To Fetch Favorites From {Platform.capitalize()}')
+                self.Log.warning(f'Failed To Fetch Favorites From {Platform.capitalize()} ({Response.status})')
 
         for Platform in self.Data:
             Tasks.append(Fetch(Platform, self.Data[Platform]['BaseUrl']))
