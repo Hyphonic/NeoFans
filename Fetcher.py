@@ -91,6 +91,7 @@ class DownloadHighlighter(RegexHighlighter):
         r'\[(?P<error>error|Error)\]',
         r'\[(?P<warning>warning|Warning)\]',
         r'\[(?P<info>info|Info)\]',
+        r'\[(?P<debug>debug|Debug)\]',
     ]
 
     highlights.extend([rf'\[(?P<queue_{Queue}>{Queue}/{QueueLimit})\]' for Queue in range(QueueLimit + 1)])
@@ -103,6 +104,7 @@ class DownloadHighlighter(RegexHighlighter):
 
 ThemeDict = {
     'log.time': 'bright_black',
+    'logging.level.debug': '#B3D7EC',
     'logging.level.info': '#A0D6B4',
     'logging.level.warning': '#F5D7A3',
     'logging.level.error': '#F5A3A3',
