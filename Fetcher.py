@@ -463,6 +463,7 @@ class Downloader:
             return TotalSize
         except Exception as Error:
             self.ErrorLogger(Error)
+            return 0
 
     async def Download(self, File: FileData) -> int:
         if self.Stopped:
