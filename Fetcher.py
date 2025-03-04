@@ -15,10 +15,11 @@ import orjson
 from dataclasses import dataclass
 from typing import Union, Tuple
 from collections import deque
-from platform import system
 from asyncio import Queue
 from pathlib import Path
 import statistics
+import platform
+import resource
 import shutil
 import random
 import math
@@ -28,7 +29,7 @@ import gc
 import re
 
 # Special Imports For Linux Systems
-if system() == 'Linux':
+if platform.system() == 'Linux':
     import uvloop
 
 # Logging
@@ -455,12 +456,19 @@ class Downloader:
                 Response.raise_for_status()
                 
                 async with aiofiles.open(OutPath, 'wb') as f:
-                    async for chunk in Response.content.iter_chunked(int(ChunkSize)):
-                        if self.Stopped:
-                            return 0
-                        await f.write(chunk)
-                        TotalSize += len(chunk)
+                    try:
+                        async for chunk in Response.content.iter_chunked(int(ChunkSize)):
+                            if self.Stopped:
+                                return 0
+                            await f.write(chunk)
+                            TotalSize += len(chunk)
+                    except (asyncio.TimeoutError, aiohttp.ClientPayloadError) as Error:
+                        self.Log.warning(f'Failed To Download {Url} ({Error})')
+                        raise Error
             return TotalSize
+        except (OSError, BlockingIOError) as Error:
+            self.Log.error(f'OS/IO Error: {Error} For {Url}')
+            return 0
         except Exception as Error:
             self.ErrorLogger(Error)
             return 0
@@ -550,13 +558,33 @@ async def Humanize(Bytes: int) -> str:
 async def CalculateTransfers(FileCount, MinTransfers=4, MaxTransfers=32, MinFiles=100, MaxFiles=50000):
     return max(MinTransfers, min(MaxTransfers, round(MinTransfers + (MaxTransfers - MinTransfers) * ((math.log(FileCount) - math.log(MinFiles)) / (math.log(MaxFiles) - math.log(MinFiles))))))
 
+async def IncreaseFileDescriptorLimit():
+    if platform.system() == 'Linux':
+        SoftLimit, HardLimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+        DesiredLimit = min(HardLimit, 4096)
+        if SoftLimit < DesiredLimit:
+            try:
+                resource.setrlimit(resource.RLIMIT_NOFILE, (DesiredLimit, HardLimit))
+                Log.warning(f'Increased File Descriptor Limit From {SoftLimit} To {DesiredLimit}')
+            except Exception as Error:
+                Log.warning(f'Failed To Increase File Descriptor Limit: {Error}')
+
+async def RecycleConnections(Session: aiohttp.ClientSession, Interval=300) -> None:
+    while True:
+        await asyncio.sleep(Interval)
+        Session.connector._cleanup()
+        gc.collect()
+
 if __name__ == '__main__':
     async def Main() -> None:
+        await IncreaseFileDescriptorLimit()
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
         
         # Smart configuration with defaults
         FileSizeHistory = deque(maxlen=100)
+
+        AbsoluteMinSemaphore = 4
         
         # Default semaphore limits - will be adjusted dynamically
         MinSemaphore = 8  # Default min threads
@@ -572,6 +600,8 @@ if __name__ == '__main__':
             nonlocal CurrentSemaphoreLimit, MinSemaphore, MaxSemaphore
             while True:
                 await asyncio.sleep(30)  # Adjust every 30 seconds
+
+                MinSemaphore = max(AbsoluteMinSemaphore, MinSemaphore)
                 
                 # Smart default if we don't have enough data yet
                 if len(FileSizeHistory) < 10:
@@ -586,18 +616,18 @@ if __name__ == '__main__':
                     MaxSemaphore = min(32, MaxSemaphore + 1)
                 elif all(Size > 10e6 for Size in list(FileSizeHistory)[-10:]):
                     # If recent files are all large, decrease min parallelism
-                    MinSemaphore = max(4, MinSemaphore - 1)
+                    MinSemaphore = max(AdjustSemaphoreLimit, MinSemaphore - 1)
                 
                 # Calculate new limit based on file sizes
                 if MedianSize < 1e6:  # < 1MB
                     NewLimit = MaxSemaphore
                 elif MedianSize > 20e6:  # > 20MB
-                    NewLimit = MinSemaphore
+                    NewLimit = max(AbsoluteMinSemaphore, MinSemaphore)
                 else:
                     # Linear scale between min and max
                     Factor = 1 - ((MedianSize - 1e6) / (19e6))
                     RangeSize = MaxSemaphore - MinSemaphore
-                    NewLimit = int(MinSemaphore + (Factor * RangeSize))
+                    NewLimit = max(AbsoluteMinSemaphore, int(MinSemaphore + (RangeSize * Factor)))
                     
                 # Apply change if significant
                 if abs(NewLimit - CurrentSemaphoreLimit) > 1:
@@ -620,16 +650,21 @@ if __name__ == '__main__':
         
         # Configure HTTP/2 Connector with default settings
         TCPConnector = aiohttp.TCPConnector(
-            limit=DefaultSemaphore*8, 
-            limit_per_host=DefaultSemaphore*4,
+            limit=DefaultSemaphore*4, 
+            limit_per_host=8,
             ssl=False, 
-            enable_cleanup_closed=True
+            enable_cleanup_closed=True,
+            force_close=True,
+            keepalive_timeout=30,
+            use_dns_cache=True,
+            ttl_dns_cache=30
         )
         
         Timeout = aiohttp.ClientTimeout(total=TimeoutConfig, connect=30.0, sock_connect=30.0, sock_read=TimeoutConfig)
         
         async with aiohttp.ClientSession(connector=TCPConnector, timeout=Timeout, 
                                         trust_env=True, raise_for_status=False) as Session:
+            ConnectionsRecycler = asyncio.create_task(RecycleConnections(Session))
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch, DefaultSemaphore)
             
@@ -693,6 +728,7 @@ if __name__ == '__main__':
                                 
                             Creator = await CreatorQueue.get()
                             try:
+                                await asyncio.sleep(random.uniform(0.1, 0.5))
                                 await Fetch.Posts(Creator)
                             except Exception as Error:
                                 ErrorLogger(Error)
@@ -723,9 +759,10 @@ if __name__ == '__main__':
                 
             finally:
                 SemaphoreAdjustTask.cancel()
+                ConnectionsRecycler.cancel()
                 for Task in DownloadTasks:
                     Task.cancel()
-                await asyncio.gather(*DownloadTasks, SemaphoreAdjustTask, return_exceptions=True)
+                await asyncio.gather(*DownloadTasks, SemaphoreAdjustTask, ConnectionsRecycler, return_exceptions=True)
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
@@ -735,7 +772,7 @@ if __name__ == '__main__':
             Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based On {FileCount} Files)')
 
     try:
-        uvloop.run(Main()) if system() == 'Windows' else asyncio.run(Main())
+        uvloop.run(Main()) if platform.system() == 'Windows' else asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
         for File in TempDir.iterdir():
