@@ -655,7 +655,6 @@ if __name__ == '__main__':
             ssl=False, 
             enable_cleanup_closed=True,
             force_close=True,
-            keepalive_timeout=30,
             use_dns_cache=True,
             ttl_dns_cache=30
         )
