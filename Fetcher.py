@@ -1,3 +1,4 @@
+
 # Main Imports - pip install -r requirements.txt
 # Rclone Installation - https://rclone.org/install/
 # Rclone Configuration - https://rclone.org/docs/
@@ -17,7 +18,6 @@ from typing import Union, Tuple
 from asyncio import Queue
 from pathlib import Path
 import platform
-import resource
 import shutil
 import random
 import math
@@ -28,6 +28,7 @@ import re
 
 # Special Imports For Linux Systems
 if platform.system() == 'Linux':
+    import resource
     import uvloop
 
 # Logging
@@ -266,7 +267,8 @@ class Fetcher:
 
     async def LookupHashes(self) -> None:
         ProcessedHashes = set()
-        Semaphore = asyncio.Semaphore(SemaphoreLimit)
+        NewSemaphoreLimit = SemaphoreLimit / 2
+        Semaphore = asyncio.Semaphore(NewSemaphoreLimit)
         
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
             try:
@@ -302,12 +304,12 @@ class Fetcher:
                     self.Log.warning(f'Failed To Lookup Hashes For {Directory}')
         
         if CreatorTasks:
-            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {SemaphoreLimit} Parallel Workers...')
+            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {NewSemaphoreLimit} Parallel Workers...')
             
             Tasks = []
             for Directory, CreatorName in CreatorTasks:
                 Tasks.append(asyncio.create_task(ProcessCreator(Directory, CreatorName)))
-                if len(Tasks) >= SemaphoreLimit * 4:
+                if len(Tasks) >= NewSemaphoreLimit * 4:
                     await asyncio.gather(*Tasks)
                     Tasks = []
             
@@ -580,7 +582,8 @@ async def RecycleConnections(Session: aiohttp.ClientSession, Interval=300) -> No
 
 if __name__ == '__main__':
     async def Main() -> None:
-        await IncreaseFileDescriptorLimit()
+        if platform.system() == 'Linux':
+            await IncreaseFileDescriptorLimit()
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
         FileSizeHistory = []
@@ -631,6 +634,7 @@ if __name__ == '__main__':
                 await Fetch.LookupHashes()
                 Log.info('Fetching Favorites...')
                 await Fetch.Favorites()
+                Log.info('Fetching Posts...')
 
                 AllCreators = []
                 for Platform in Fetch.Data:
@@ -638,50 +642,12 @@ if __name__ == '__main__':
                         AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
 
                 random.shuffle(AllCreators)
+
+                for Creator in AllCreators:
+                    await Fetch.Posts(Creator)
+                    if Fetch.Stopped:
+                        break
                 
-                # Background Fetch Function
-                async def BackgroundFetch():
-                    CreatorQueue = asyncio.Queue()
-                    for Creator in AllCreators:
-                        await CreatorQueue.put(Creator)
-                    
-                    async def FetchCreatorPosts():
-                        while not CreatorQueue.empty():
-                            # Dynamically adjust parallel creator fetches based on queue size
-                            QueuePercentage = DownloadQueue.qsize() / DownloadQueue.maxsize
-                            if QueuePercentage > QueueThresholds[1]:
-                                await asyncio.sleep(5)  # Queue high, wait a bit
-                                continue
-                                
-                            Creator = await CreatorQueue.get()
-                            try:
-                                await asyncio.sleep(random.uniform(0.1, 0.5))
-                                await Fetch.Posts(Creator)
-                            except Exception as Error:
-                                ErrorLogger(Error)
-                            finally:
-                                CreatorQueue.task_done()
-                    
-                    # Create background fetcher tasks
-                    FetcherTasks = [
-                        asyncio.create_task(FetchCreatorPosts())
-                        for _ in range(SemaphoreLimit)
-                    ]
-                    
-                    try:
-                        await CreatorQueue.join()
-                    finally:
-                        for task in FetcherTasks:
-                            task.cancel()
-                        await asyncio.gather(*FetcherTasks, return_exceptions=True)
-                
-                # Start background fetching in parallel with downloads
-                backgroundTask = asyncio.create_task(BackgroundFetch())
-                
-                # Wait for all tasks to complete
-                await asyncio.gather(backgroundTask, DownloadQueue.join())
-                
-                Fetch.Log.info(f'Fetched {Fetch.TotalFiles} Files')
                 Download.TotalFiles = Fetch.TotalFiles
                 
             finally:
@@ -698,7 +664,10 @@ if __name__ == '__main__':
             Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based On {FileCount} Files)')
 
     try:
-        uvloop.run(Main()) if platform.system() == 'Windows' else asyncio.run(Main())
+        if platform.system() == 'Linux':
+            uvloop.run(Main())
+        else:
+            asyncio.run(Main())
     except KeyboardInterrupt:
         Log.info('Exiting...')
         for File in TempDir.iterdir():

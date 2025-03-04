@@ -9,6 +9,7 @@ orjson
 aiohttp
 aiofiles
 tenacity
+resource
 python-dotenv
 rclone-python
 charset-normalizer
