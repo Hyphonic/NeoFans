@@ -4,18 +4,14 @@
 # Rclone Configuration - https://rclone.org/docs/
 from tenacity import retry, stop_after_attempt, wait_exponential, RetryError, retry_if_exception_type, wait_random
 from rclone_python.utils import RcloneException
-from aiomonitor import start_monitor
 from rclone_python import rclone
 from dotenv import load_dotenv
 import aiofiles.os
 import aiofiles
-import aiometer
 import aiohttp
 import orjson
 
 # Default Imports
-from collections import defaultdict
-from urllib.parse import urlparse
 from dataclasses import dataclass
 from typing import Union, Tuple
 from asyncio import Queue
@@ -25,7 +21,6 @@ import asyncio
 import shutil
 import random
 import math
-import time
 import sys
 import os
 import gc
@@ -203,38 +198,6 @@ class LowDiskSpace(Exception):
     pass
 
 Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed. Transfers Will Not Work!')
-
-# Connection Statistics Class
-class ConnectionStats:
-    def __init__(self):
-        self.ConnectionsByDomain = defaultdict(list)
-        self.ConnectionsTotal = []
-        self.LastReportTime = time.time()
-        self.ReportInterval = 60
-    
-    def AddConnection(self, Url: str):
-        Now = time.time()
-        Domain = urlparse(Url).netloc
-        self.ConnectionsByDomain[Domain].append(Now)
-        self.ConnectionsTotal.append(Now)
-
-        Cuttoff = Now - 300
-        self.ConnectionsTotal = [Connection for Connection in self.ConnectionsTotal if Connection > Cuttoff]
-        for Domain in list(self.ConnectionsByDomain.keys()):
-            self.ConnectionsByDomain[Domain] = [Connection for Connection in self.ConnectionsByDomain[Domain] if Connection > Cuttoff]
-    
-    def Report(self):
-        Now = time.time()
-        Cuttoff1Min = Now - 60
-        TotalLastMin = len([Connection for Connection in self.ConnectionsTotal if Connection > Cuttoff1Min])
-
-        Log.info(f'Connections Last Minute: {TotalLastMin/60:.2f}/sec Total: {len(self.ConnectionsTotal)}')
-
-        DomainsSorted = sorted(self.ConnectionsByDomain, key=lambda x: len(self.ConnectionsByDomain[x]), reverse=True)
-        for Domain in DomainsSorted[:5]:
-            DomainLastMin = len([Connection for Connection in self.ConnectionsByDomain[Domain] if Connection > Cuttoff1Min])
-            if DomainLastMin > 0:
-                Log.info(f'{Domain}: {DomainLastMin/60:.2f}/sec Total: {len(self.ConnectionsByDomain[Domain])}')
 
 # Fetcher Class
 class Fetcher:
@@ -619,23 +582,23 @@ async def RecycleConnections(Session: aiohttp.ClientSession, Interval=60) -> Non
 
 if __name__ == '__main__':
     async def Main() -> None:
-        Stats = ConnectionStats()
         if platform.system() == 'Linux':
             await IncreaseFileDescriptorLimit()
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
         FileSizeHistory = []
 
-        async def ProcessDownload(File: FileData) -> int:
-            try:
-                Stats.add_connection(File.Url)
-                FileSize = await Download.Download(File)
-                if FileSize:
-                    FileSizeHistory.append(FileSize)
-                return FileSize
-            except Exception as Error:
-                ErrorLogger(Error)
-                return 0
+        async def ProcessDownloads(Download: Downloader):
+            while True:
+                File = await DownloadQueue.get()
+                try:
+                    FileSize = await Download.Download(File)
+                    if FileSize:
+                        FileSizeHistory.append(FileSize)
+                except Exception as Error:
+                    ErrorLogger(Error)
+                finally:
+                    DownloadQueue.task_done()
         
         TCPConnector = aiohttp.TCPConnector(
             limit=SemaphoreLimit*2, 
@@ -647,92 +610,58 @@ if __name__ == '__main__':
             ttl_dns_cache=30
         )
         
-        Timeout = aiohttp.ClientTimeout(total=TimeoutConfig)
+        Timeout = aiohttp.ClientTimeout(total=TimeoutConfig, connect=30.0, sock_connect=30.0, sock_read=TimeoutConfig)
         
         async with aiohttp.ClientSession(connector=TCPConnector, timeout=Timeout, 
-                                    trust_env=True, raise_for_status=False) as Session:
-            with start_monitor(asyncio.get_event_loop(), console_enabled=True):
-                ConnectionsRecycler = asyncio.create_task(RecycleConnections(Session))
-                Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
-                Download = Downloader(Session, Log, ErrorLogger, Fetch)
+                                        trust_env=True, raise_for_status=False) as Session:
+            ConnectionsRecycler = asyncio.create_task(RecycleConnections(Session))
+            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
+            Download = Downloader(Session, Log, ErrorLogger, Fetch)
+            
+            # Create dynamic semaphore for downloader
+            Download.Semaphore = asyncio.Semaphore(SemaphoreLimit)
+            
+            # Start the downloader tasks - create more than needed for flexibility
+            DownloadTasks = [
+                asyncio.create_task(ProcessDownloads(Download))
+                for _ in range(SemaphoreLimit * 2)  # Create more tasks than semaphore allows
+            ]
+            
+            try:
+                Log.info('Creating Directories...')
+                await Fetch.CreateDirectories()
+                Log.info('Looking Up Hashes...')
+                await Fetch.LookupHashes()
+                Log.info('Fetching Favorites...')
+                await Fetch.Favorites()
+                Log.info('Fetching Posts...')
+
+                AllCreators = []
+                for Platform in Fetch.Data:
+                    for Service in Fetch.Data[Platform]['Creators']:
+                        AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
+
+                random.shuffle(AllCreators)
+
+                for Creator in AllCreators:
+                    await Fetch.Posts(Creator)
+                    if Fetch.Stopped:
+                        break
                 
-                # Create dynamic semaphore for downloader
-                Download.Semaphore = asyncio.Semaphore(SemaphoreLimit)
+                Download.TotalFiles = Fetch.TotalFiles
                 
-                # Start the downloader tasks - create more than needed for flexibility
-                DownloadTasks = [
-                    asyncio.create_task(ProcessDownload(Download))
-                    for _ in range(SemaphoreLimit * 2)  # Create more tasks than semaphore allows
-                ]
-                
-                try:
-                    Log.info('Creating Directories...')
-                    await Fetch.CreateDirectories()
-                    Log.info('Looking Up Hashes...')
-                    await Fetch.LookupHashes()
-                    Log.info('Fetching Favorites...')
-                    await Fetch.Favorites()
-                    Log.info('Fetching Posts...')
+            finally:
+                ConnectionsRecycler.cancel()
+                for Task in DownloadTasks:
+                    Task.cancel()
+                await asyncio.gather(*DownloadTasks, ConnectionsRecycler, return_exceptions=True)
 
-                    async def QueueProcessor():
-                        while not Fetch.Stopped:
-                            Files = []
-                            try:
-                                while len(Files) < SemaphoreLimit:
-                                    try:
-                                        File = DownloadQueue.get_nowait()
-                                        Files.append(File)
-                                    except asyncio.QueueEmpty:
-                                        break
-                            except Exception:
-                                await asyncio.sleep(0.1)
-                                continue
-                            if Files:
-                                Results = await aiometer.run_all(
-                                    ProcessDownload,
-                                    Files,
-                                    max_at_once=SemaphoreLimit,
-                                    max_per_second=SemaphoreLimit
-                                )
-                                for Result in Results:
-                                    DownloadQueue.task_done()
-                            
-                            else:
-                                await asyncio.sleep(0.1)
-                    
-                    QueueTask = asyncio.create_task(QueueProcessor())
-                    await QueueTask
+            FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
+            OptimalTransfers = await CalculateTransfers(FileCount)
 
-                    AllCreators = []
-                    for Platform in Fetch.Data:
-                        for Service in Fetch.Data[Platform]['Creators']:
-                            AllCreators.extend(Fetch.Data[Platform]['Creators'][Service])
-
-                    random.shuffle(AllCreators)
-
-                    for Creator in AllCreators:
-                        await Fetch.Posts(Creator)
-                        if Fetch.Stopped:
-                            break
-                    
-                    Download.TotalFiles = Fetch.TotalFiles
-                    
-                finally:
-                    if 'QueueTask' in locals():
-                        QueueTask.cancel()
-                    ConnectionsRecycler.cancel()
-                    for Task in DownloadTasks:
-                        Task.cancel()
-                    await asyncio.gather(ConnectionsRecycler, 
-                                   *([QueueTask] if 'QueueTask' in locals() else []), 
-                                   return_exceptions=True)
-
-                FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
-                OptimalTransfers = await CalculateTransfers(FileCount)
-
-                async with aiofiles.open('Data/Transfers.txt', 'w') as F:
-                    await F.write(str(OptimalTransfers))
-                Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based On {FileCount} Files)')
+            async with aiofiles.open('Data/Transfers.txt', 'w') as F:
+                await F.write(str(OptimalTransfers))
+            Log.info(f'Optimal Rclone Transfers: {OptimalTransfers} (Based On {FileCount} Files)')
 
     try:
         if platform.system() == 'Linux':
