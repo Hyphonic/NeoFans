@@ -41,7 +41,7 @@ import logging
 
 # Config
 QueueThresholds = [.2, .8]
-SemaphoreLimit = 1
+SemaphoreLimit = 8
 QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
@@ -354,7 +354,8 @@ class Fetcher:
 
     async def Posts(self, Creator: CreatorData) -> None:
         CurrentCounter = 0
-        NewCounter = 0
+        CurrentSkipped = 0
+        Counter = 0
         SkippedCounter = 0
         Page = StartingPage
         QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[1]
@@ -364,9 +365,10 @@ class Fetcher:
 
         @retry(**RetryConfig)
         async def Fetch(Creator: CreatorData) -> None:
-            nonlocal CurrentCounter, NewCounter, SkippedCounter, Page
+            nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped
             while not self.Stopped:
                 CurrentCounter = 0
+                CurrentSkipped = 0
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
@@ -404,10 +406,11 @@ class Fetcher:
                                             break
                                         else:
                                             await self.DownloadQueue.put(FileInfo)
-                                        NewCounter += 1
+                                        Counter += 1
                                         self.TotalFiles += 1
                                     else:
                                         SkippedCounter += 1
+                                        CurrentSkipped += 1
 
                                 for Attachment in Post.get('attachments', []):
                                     if Attachment.get('path'):
@@ -424,11 +427,12 @@ class Fetcher:
                                                 Extension=FilePath.suffix
                                             )
                                             self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
-                                            NewCounter += 1
+                                            Counter += 1
                                             self.TotalFiles += 1
                                         else:
                                             SkippedCounter += 1
-                            self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page}')
+                                            CurrentSkipped += 1
+                            self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page} (Skipped: {CurrentSkipped})')
                             Page += 1
                 except Exception as Error:
                     self.ErrorLogger(Error)
@@ -437,7 +441,7 @@ class Fetcher:
 
         await Fetch(Creator)
         if not self.Stopped:
-            self.Log.info(f'Fetched {NewCounter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
+            self.Log.info(f'Fetched {Counter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
 
 # Downloader Class
 class Downloader:
@@ -462,23 +466,21 @@ class Downloader:
             async with self.Session.get(Url) as Response:
                 Response.raise_for_status()
                 
-                async with aiofiles.open(OutPath, 'wb') as f:
-                    try:
-                        async for chunk in Response.content.iter_chunked(int(ChunkSize)):
-                            if self.Stopped:
-                                return 0
-                            await f.write(chunk)
-                            TotalSize += len(chunk)
-                    except (asyncio.TimeoutError, aiohttp.ClientPayloadError) as Error:
-                        self.Log.warning(f'Failed To Download {Url} ({Error})')
-                        raise Error
+                async with aiofiles.open(OutPath, 'wb') as File:
+                    async for chunk in Response.content.iter_chunked(int(ChunkSize)):
+                        if self.Stopped:
+                            return 0
+                        await File.write(chunk)
+                        TotalSize += len(chunk)
             return TotalSize
-        except (OSError, BlockingIOError) as Error:
-            self.Log.error(f'OS/IO Error: {Error} For {Url}')
-            return 0
         except Exception as Error:
-            self.ErrorLogger(Error)
-            return 0
+            if any(isinstance(Error, ExceptionType) for ExceptionType in AiohttpExceptions):
+                return 0
+            elif any(isinstance(Error, ExceptionType) for ExceptionType in [BlockingIOError, RuntimeError]):
+                return 0
+            else:
+                self.ErrorLogger(Error)
+                return 0
 
     async def Download(self, File: FileData) -> int:
         if self.Stopped:
@@ -585,6 +587,7 @@ async def RecycleConnections(Session: aiohttp.ClientSession, Interval=60) -> Non
 if __name__ == '__main__':
     async def Main() -> None:
         if platform.system() == 'Linux':
+            Log.info('Running On Linux, Enabling Special Features...')
             await IncreaseFileDescriptorLimit()
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
