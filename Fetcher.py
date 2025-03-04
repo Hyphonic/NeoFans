@@ -14,10 +14,8 @@ import orjson
 # Default Imports
 from dataclasses import dataclass
 from typing import Union, Tuple
-from collections import deque
 from asyncio import Queue
 from pathlib import Path
-import statistics
 import platform
 import resource
 import shutil
@@ -42,6 +40,7 @@ import logging
 
 # Config
 QueueThresholds = [.2, .8]
+SemaphoreLimit = 16
 QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
@@ -142,7 +141,7 @@ def InitLogging():
 
     ConsoleHandler.setFormatter(logging.Formatter('%(message)s', datefmt='[%H:%M:%S]'))
 
-    logging.basicConfig(level=logging.INFO, handlers=[ConsoleHandler], force=True)
+    logging.basicConfig(level=logging.DEBUG, handlers=[ConsoleHandler], force=True)
 
     Log = logging.getLogger('rich')
     Log.handlers.clear()
@@ -263,9 +262,9 @@ class Fetcher:
                     rclone.mkdir(f'{rclone.get_remotes()[-1]}{Directory}')
                     self.Log.info(f'Created Missing Directory {Directory} On Remote Storage')
 
-    async def LookupHashes(self, HashLookupLimit=16) -> None:
+    async def LookupHashes(self) -> None:
         ProcessedHashes = set()
-        Semaphore = asyncio.Semaphore(HashLookupLimit)
+        Semaphore = asyncio.Semaphore(SemaphoreLimit)
         
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
             try:
@@ -301,12 +300,12 @@ class Fetcher:
                     self.Log.warning(f'Failed To Lookup Hashes For {Directory}')
         
         if CreatorTasks:
-            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {HashLookupLimit} Parallel Workers...')
+            self.Log.info(f'Looking Up Hashes From {len(CreatorTasks)} Creators With {SemaphoreLimit} Parallel Workers...')
             
             Tasks = []
             for Directory, CreatorName in CreatorTasks:
                 Tasks.append(asyncio.create_task(ProcessCreator(Directory, CreatorName)))
-                if len(Tasks) >= HashLookupLimit * 4:
+                if len(Tasks) >= SemaphoreLimit * 4:
                     await asyncio.gather(*Tasks)
                     Tasks = []
             
@@ -436,7 +435,9 @@ class Fetcher:
 
 # Downloader Class
 class Downloader:
-    def __init__(self, Session: aiohttp.ClientSession, Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher, SemaphoreLimit: int = 16) -> None:
+    def __init__(self, Session: aiohttp.ClientSession,
+                 Log: logging.Logger, ErrorLogger: logging.Logger, Fetcher: Fetcher
+                ) -> None:
         self.Log = Log
         self.ErrorLogger = ErrorLogger
         self.Session = Session
@@ -580,61 +581,7 @@ if __name__ == '__main__':
         await IncreaseFileDescriptorLimit()
         Log.info(f'Low Disk Space Threshold: {await Humanize(LowDiskSpaceThreshold)}')
         DownloadQueue = Queue(maxsize=QueueLimit)
-        
-        # Smart configuration with defaults
-        FileSizeHistory = deque(maxlen=100)
-
-        AbsoluteMinSemaphore = 4
-        
-        # Default semaphore limits - will be adjusted dynamically
-        MinSemaphore = 8  # Default min threads
-        MaxSemaphore = 24  # Default max threads
-        DefaultSemaphore = 16  # Starting value
-        CurrentSemaphoreLimit = DefaultSemaphore
-        
-        # Default creator fetch limits - will adjust based on queue
-        MinCreatorFetches = 1
-        MaxCreatorFetches = 5
-        
-        async def AdjustSemaphoreLimit():
-            nonlocal CurrentSemaphoreLimit, MinSemaphore, MaxSemaphore
-            while True:
-                await asyncio.sleep(30)  # Adjust every 30 seconds
-
-                MinSemaphore = max(AbsoluteMinSemaphore, MinSemaphore)
-                
-                # Smart default if we don't have enough data yet
-                if len(FileSizeHistory) < 10:
-                    # Keep current setting until we have enough data
-                    continue
-                    
-                MedianSize = statistics.median(FileSizeHistory)
-                
-                # Auto-adjust min/max semaphore limits based on file size patterns
-                if all(size < 1e6 for size in list(FileSizeHistory)[-10:]):
-                    # If recent files are all small, increase max parallelism
-                    MaxSemaphore = min(32, MaxSemaphore + 1)
-                elif all(Size > 10e6 for Size in list(FileSizeHistory)[-10:]):
-                    # If recent files are all large, decrease min parallelism
-                    MinSemaphore = max(AdjustSemaphoreLimit, MinSemaphore - 1)
-                
-                # Calculate new limit based on file sizes
-                if MedianSize < 1e6:  # < 1MB
-                    NewLimit = MaxSemaphore
-                elif MedianSize > 20e6:  # > 20MB
-                    NewLimit = max(AbsoluteMinSemaphore, MinSemaphore)
-                else:
-                    # Linear scale between min and max
-                    Factor = 1 - ((MedianSize - 1e6) / (19e6))
-                    RangeSize = MaxSemaphore - MinSemaphore
-                    NewLimit = max(AbsoluteMinSemaphore, int(MinSemaphore + (RangeSize * Factor)))
-                    
-                # Apply change if significant
-                if abs(NewLimit - CurrentSemaphoreLimit) > 1:
-                    Log.info(f'Adjusting Download Threads From {CurrentSemaphoreLimit} To {NewLimit} Based On Median File Size')
-                    CurrentSemaphoreLimit = NewLimit
-                    # Update the semaphore object
-                    Download.Semaphore = asyncio.Semaphore(CurrentSemaphoreLimit)
+        FileSizeHistory = []
 
         async def ProcessDownloads(Download: Downloader):
             while True:
@@ -648,9 +595,8 @@ if __name__ == '__main__':
                 finally:
                     DownloadQueue.task_done()
         
-        # Configure HTTP/2 Connector with default settings
         TCPConnector = aiohttp.TCPConnector(
-            limit=DefaultSemaphore*4, 
+            limit=SemaphoreLimit*4, 
             limit_per_host=8,
             ssl=False, 
             enable_cleanup_closed=True,
@@ -665,19 +611,16 @@ if __name__ == '__main__':
                                         trust_env=True, raise_for_status=False) as Session:
             ConnectionsRecycler = asyncio.create_task(RecycleConnections(Session))
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
-            Download = Downloader(Session, Log, ErrorLogger, Fetch, DefaultSemaphore)
+            Download = Downloader(Session, Log, ErrorLogger, Fetch)
             
             # Create dynamic semaphore for downloader
-            Download.Semaphore = asyncio.Semaphore(CurrentSemaphoreLimit)
+            Download.Semaphore = asyncio.Semaphore(SemaphoreLimit)
             
             # Start the downloader tasks - create more than needed for flexibility
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
-                for _ in range(MaxSemaphore * 2)  # Create more tasks than semaphore allows
+                for _ in range(SemaphoreLimit * 2)  # Create more tasks than semaphore allows
             ]
-            
-            # Start the semaphore adjustment task
-            SemaphoreAdjustTask = asyncio.create_task(AdjustSemaphoreLimit())
             
             try:
                 Log.info('Creating Directories...')
@@ -701,28 +644,11 @@ if __name__ == '__main__':
                         await CreatorQueue.put(Creator)
                     
                     async def FetchCreatorPosts():
-                        nonlocal MinCreatorFetches, MaxCreatorFetches
                         while not CreatorQueue.empty():
                             # Dynamically adjust parallel creator fetches based on queue size
                             QueuePercentage = DownloadQueue.qsize() / DownloadQueue.maxsize
                             if QueuePercentage > QueueThresholds[1]:
                                 await asyncio.sleep(5)  # Queue high, wait a bit
-                                continue
-                                
-                            # Calculate how many creators to fetch in parallel based on queue size
-                            # Lower queue = more parallel fetches
-                            AvailableFraction = 1 - (QueuePercentage / QueueThresholds[1])
-                            ParallelFetches = max(
-                                MinCreatorFetches,
-                                min(MaxCreatorFetches, 
-                                    int(AvailableFraction * MaxCreatorFetches))
-                            )
-                            
-                            # Adjust the number of active fetcher tasks based on ParallelFetches
-                            # (This is the missing part where ParallelFetches is used)
-                            if len([t for t in FetcherTasks if not t.done()]) > ParallelFetches:
-                                # Too many active tasks, wait a bit
-                                await asyncio.sleep(1)
                                 continue
                                 
                             Creator = await CreatorQueue.get()
@@ -737,7 +663,7 @@ if __name__ == '__main__':
                     # Create background fetcher tasks
                     FetcherTasks = [
                         asyncio.create_task(FetchCreatorPosts())
-                        for _ in range(MaxCreatorFetches)
+                        for _ in range(SemaphoreLimit)
                     ]
                     
                     try:
@@ -757,11 +683,10 @@ if __name__ == '__main__':
                 Download.TotalFiles = Fetch.TotalFiles
                 
             finally:
-                SemaphoreAdjustTask.cancel()
                 ConnectionsRecycler.cancel()
                 for Task in DownloadTasks:
                     Task.cancel()
-                await asyncio.gather(*DownloadTasks, SemaphoreAdjustTask, ConnectionsRecycler, return_exceptions=True)
+                await asyncio.gather(*DownloadTasks, ConnectionsRecycler, return_exceptions=True)
 
             FileCount = sum(1 for _ in Path(FinalDir).rglob('*') if _.is_file())
             OptimalTransfers = await CalculateTransfers(FileCount)
