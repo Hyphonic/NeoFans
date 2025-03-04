@@ -629,8 +629,8 @@ if __name__ == '__main__':
         
         async with aiohttp.ClientSession(connector=TCPConnector, timeout=Timeout, 
                                         trust_env=True, raise_for_status=False) as Session:
-            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue, DefaultSemaphore)
-            Download = Downloader(Session, Log, ErrorLogger, Fetch)
+            Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
+            Download = Downloader(Session, Log, ErrorLogger, Fetch, DefaultSemaphore)
             
             # Create dynamic semaphore for downloader
             Download.Semaphore = asyncio.Semaphore(CurrentSemaphoreLimit)
