@@ -166,7 +166,7 @@ Install()
 load_dotenv()
 
 RetryConfig = dict(
-    stop=stop_after_attempt(3),
+    stop=stop_after_attempt(5),
     wait=wait_exponential(multiplier=1, min=4, max=10) + wait_random(0, 2),
     retry_error_cls=RetryError,
     retry=(
@@ -574,7 +574,7 @@ async def IncreaseFileDescriptorLimit():
             except Exception as Error:
                 Log.warning(f'Failed To Increase File Descriptor Limit: {Error}')
 
-async def RecycleConnections(Session: aiohttp.ClientSession, Interval=300) -> None:
+async def RecycleConnections(Session: aiohttp.ClientSession, Interval=60) -> None:
     while True:
         await asyncio.sleep(Interval)
         Session.connector._cleanup()
@@ -601,7 +601,7 @@ if __name__ == '__main__':
                     DownloadQueue.task_done()
         
         TCPConnector = aiohttp.TCPConnector(
-            limit=SemaphoreLimit*4, 
+            limit=SemaphoreLimit*2, 
             limit_per_host=8,
             ssl=False, 
             enable_cleanup_closed=True,
