@@ -10,8 +10,6 @@ aiohttp
 aiofiles
 tenacity
 resource
-aiometer
-aiomonitor
 python-dotenv
 rclone-python
 charset-normalizer

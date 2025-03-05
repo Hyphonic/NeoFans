@@ -14,6 +14,7 @@ import orjson
 # Default Imports
 from dataclasses import dataclass
 from typing import Union, Tuple
+from datetime import datetime
 from asyncio import Queue
 from pathlib import Path
 import platform
@@ -41,13 +42,14 @@ import logging
 
 # Config
 QueueThresholds = [.2, .8]
-SemaphoreLimit = 8
+SemaphoreLimit = 1
 QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
 ChunkSize = 3e+6
 TempDir = Path('Data/Temp')
 FinalDir = Path('Data/Files')
+PublishedDateFile = Path('Data/LPD.json')
 LowDiskSpaceThreshold = max(5e+9, shutil.disk_usage('.').free * 0.1)
 rclone.set_log_level('ERROR')
 TimeoutConfig = 300.0
@@ -76,7 +78,7 @@ def GradientColor(Start, End, Steps):
         for Step in range(Steps)
     ]
 
-def GenerateHighlightPatterns(Type, MaxValue, Format):
+def GenerateHighlightPatterns(MaxValue: int, Format: str) -> list:
     return [re.compile(Format.format(Value=Value, Max=MaxValue)) for Value in range(MaxValue + 1)]
 
 class DownloadHighlighter(RegexHighlighter):
@@ -158,6 +160,8 @@ def InitLogging():
 def ErrorLogger(Error):
     if isinstance(Error, LowDiskSpace):
         Log.warning(f'Low disk space: {Error}')
+    elif any(isinstance(Error, ExceptionType) for ExceptionType in [asyncio.CancelledError, KeyboardInterrupt, PermissionError]):
+        pass
     else:
         Console.print_exception(max_frames=1, width=Console.width or 120)
 
@@ -194,10 +198,38 @@ class CreatorData:
     Platform: str
     Service: str
 
+@dataclass
+class PDF:
+    ID: Union[str, int]
+    Date: datetime
+
 class LowDiskSpace(Exception):
     pass
 
-Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed. Transfers Will Not Work!')
+Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed.')
+
+# Last Published Date Class
+class LPD:
+    @staticmethod
+    async def Load() -> list[PDF]:
+        try:
+            async with aiofiles.open(PublishedDateFile, 'r') as File:
+                Data = await File.read()
+                Dates = [PDF(**Item) for Item in orjson.loads(Data)]
+                Log.info(f'Loaded {len(Dates)} Published Dates')
+                return Dates
+        except FileNotFoundError:
+            return []
+    
+    @staticmethod    
+    async def Save(Data: list[PDF]) -> None:
+        async with aiofiles.open(PublishedDateFile, 'wb') as File:
+            JsonData = orjson.dumps([{
+                'ID': Item.ID,
+                'Date': Item.Date.isoformat()
+            } for Item in Data])
+            await File.write(JsonData)
+
 
 # Fetcher Class
 class Fetcher:
@@ -352,20 +384,27 @@ class Fetcher:
         await asyncio.gather(*Tasks)
         self.Log.debug(f'Fetched {Counter} Favorites')
 
-    async def Posts(self, Creator: CreatorData) -> None:
+    async def Posts(self, Creator: CreatorData, LastPublishedDates: list[PDF]) -> None:
         CurrentCounter = 0
         CurrentSkipped = 0
         Counter = 0
         SkippedCounter = 0
         Page = StartingPage
         QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[1]
+        LastPublishedDate = None
+        NewestSavedDate = None
+
+        for Date in LastPublishedDates:
+            if str(Date.ID) == str(Creator.ID):
+                LastPublishedDate = Date.Date
+                break
 
         if self.Stopped:
             return
 
         @retry(**RetryConfig)
-        async def Fetch(Creator: CreatorData) -> None:
-            nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped
+        async def Fetch(Creator: CreatorData, CheckDateOnly: bool = False) -> bool:
+            nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped, NewestSavedDate
             while not self.Stopped:
                 CurrentCounter = 0
                 CurrentSkipped = 0
@@ -374,7 +413,6 @@ class Fetcher:
                     while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
                         await asyncio.sleep(1)
                     self.Log.warning(f'Resuming Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
-
                 try:
                     async with self.Session.get(
                         f'{self.Data[Creator.Platform]["BaseUrl"]}/{Creator.Service}/user/{Creator.ID}/posts',
@@ -384,8 +422,24 @@ class Fetcher:
                         if Response.status == 200:
                             Posts = orjson.loads(await Response.text())
                             if not Posts:
-                                break
+                                return False
 
+                            Dates = []
+                            for Post in Posts:
+                                if Post.get('published'):
+                                    Dates.append(datetime.fromisoformat(Post['published']))
+                            
+                            if Dates and (not NewestSavedDate or max(Dates) > NewestSavedDate):
+                                NewestSavedDate = max(Dates)
+                            
+                            if CheckDateOnly and LastPublishedDate and Dates:
+                                if max(Dates) <= LastPublishedDate:
+                                    self.Log.info(f'Skipping {Creator.Name} - No New Posts Since {LastPublishedDate.isoformat()}')
+                                    return False
+                                else:
+                                    self.Log.info(f'Found Newer Posts For {Creator.Name} - {max(Dates).isoformat()} > {LastPublishedDate.isoformat()}')
+                                    return True
+                            
                             for Post in Posts:
                                 if Post.get('file') and Post['file'].get('path'):
                                     FilePath = Path(Post['file']['path'])
@@ -433,11 +487,33 @@ class Fetcher:
                                             SkippedCounter += 1
                                             CurrentSkipped += 1
                             self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page} (Skipped: {CurrentSkipped})')
+                            
                             Page += 1
+                            return True
                 except Exception as Error:
                     self.ErrorLogger(Error)
                     self.Log.warning(f'Failed To Fetch Posts From {Creator.Name}')
-                    break
+                    return False
+                return False
+
+        if LastPublishedDate:
+            if not await Fetch(Creator, True):
+                return
+            Page = StartingPage  # Reset page counter if we're continuing
+
+        while not self.Stopped and await Fetch(Creator):
+            pass
+
+        if not self.Stopped:
+            if NewestSavedDate:
+                DateFound = False
+                for Date in LastPublishedDates:
+                    if str(Date.ID) == str(Creator.ID):
+                        Date.Date = NewestSavedDate
+                        DateFound = True
+                        break
+                if not DateFound:
+                    LastPublishedDates.append(PDF(ID=Creator.ID, Date=NewestSavedDate))
 
         await Fetch(Creator)
         if not self.Stopped:
@@ -568,15 +644,14 @@ async def CalculateTransfers(FileCount, MinTransfers=4, MaxTransfers=32, MinFile
     return max(MinTransfers, min(MaxTransfers, round(MinTransfers + (MaxTransfers - MinTransfers) * ((math.log(FileCount) - math.log(MinFiles)) / (math.log(MaxFiles) - math.log(MinFiles))))))
 
 async def IncreaseFileDescriptorLimit():
-    if platform.system() == 'Linux':
-        SoftLimit, HardLimit = resource.getrlimit(resource.RLIMIT_NOFILE)
-        DesiredLimit = min(HardLimit, 4096)
-        if SoftLimit < DesiredLimit:
-            try:
-                resource.setrlimit(resource.RLIMIT_NOFILE, (DesiredLimit, HardLimit))
-                Log.warning(f'Increased File Descriptor Limit From {SoftLimit} To {DesiredLimit}')
-            except Exception as Error:
-                Log.warning(f'Failed To Increase File Descriptor Limit: {Error}')
+    SoftLimit, HardLimit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    DesiredLimit = min(HardLimit, 4096)
+    if SoftLimit < DesiredLimit:
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (DesiredLimit, HardLimit))
+            Log.warning(f'Increased File Descriptor Limit From {SoftLimit} To {DesiredLimit}')
+        except Exception as Error:
+            Log.warning(f'Failed To Increase File Descriptor Limit: {Error}')
 
 async def RecycleConnections(Session: aiohttp.ClientSession, Interval=60) -> None:
     while True:
@@ -622,11 +697,9 @@ if __name__ == '__main__':
             ConnectionsRecycler = asyncio.create_task(RecycleConnections(Session))
             Fetch = Fetcher(Session, Log, ErrorLogger, DownloadQueue)
             Download = Downloader(Session, Log, ErrorLogger, Fetch)
-            
-            # Create dynamic semaphore for downloader
+
             Download.Semaphore = asyncio.Semaphore(SemaphoreLimit)
             
-            # Start the downloader tasks - create more than needed for flexibility
             DownloadTasks = [
                 asyncio.create_task(ProcessDownloads(Download))
                 for _ in range(SemaphoreLimit * 2)
@@ -641,8 +714,17 @@ if __name__ == '__main__':
                 
                 Log.info('Fetching Favorites...')
                 await Fetch.Favorites()
+
+                Log.info('Loading Published Dates...')
+                LastPublishedDates = await LPD.Load()
+
+                if LastPublishedDates:
+                    for Date in LastPublishedDates:
+                        Log.info(f'Loaded Published Date: {Date.ID} - {Date.Date}')
+                else:
+                    Log.info('No Published Dates Found')
                 
-                Log.info('Fetching Posts In Background...')
+                Log.info('Fetching Posts...')
                 AllCreators = []
                 for Platform in Fetch.Data:
                     for Service in Fetch.Data[Platform]['Creators']:
@@ -653,7 +735,10 @@ if __name__ == '__main__':
                 for Creator in AllCreators:
                     if Fetch.Stopped:
                         break
-                    await Fetch.Posts(Creator)
+                    await Fetch.Posts(Creator, LastPublishedDates)
+                
+                Log.info('Saving Published Dates...')
+                await LPD.Save(LastPublishedDates)
                 
                 Download.TotalFiles = Fetch.TotalFiles
                 
@@ -696,3 +781,15 @@ if __name__ == '__main__':
         if not isinstance(Error, asyncio.CancelledError):
             ErrorLogger(Error)
         sys.exit(1)
+    finally:
+        for Dir in [TempDir, FinalDir]:
+            if Dir.exists():
+                for File in Dir.iterdir():
+                    try:
+                        if File.is_file():
+                            Log.info(f'Deleting {File.name}')
+                            File.unlink(missing_ok=True)
+                    except PermissionError:
+                        Log.warning(f'Permission denied deleting {File}')
+                    except Exception as Error:
+                        ErrorLogger(Error)
