@@ -32,7 +32,6 @@ jobs:
           sudo warp-cli --accept-tos registration new
           sudo warp-cli --accept-tos mode warp+doh
           sudo warp-cli --accept-tos connect
-          curl https://www.cloudflare.com/cdn-cgi/trace/
 
       - name: 📦 Set Up Python
         uses: actions/setup-python@v5.4.0
@@ -40,7 +39,9 @@ jobs:
           python-version: '3.13'
       
       - name: 📦 Install Dependencies
-        run: pip install -r requirements.txt
+        run: |
+          curl https://www.cloudflare.com/cdn-cgi/trace/
+          pip install -r requirements.txt
 
       - name: 🔧 Install Rclone
         uses: AnimMouse/setup-rclone@v1
