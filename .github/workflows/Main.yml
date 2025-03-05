@@ -40,7 +40,6 @@ jobs:
       
       - name: 📦 Install Dependencies
         run: |
-          curl https://www.cloudflare.com/cdn-cgi/trace/
           pip install -r requirements.txt
 
       - name: 🔧 Install Rclone
