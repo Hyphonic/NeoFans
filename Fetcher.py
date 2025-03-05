@@ -42,7 +42,7 @@ import logging
 
 # Config
 QueueThresholds = [.2, .8]
-SemaphoreLimit = 1
+SemaphoreLimit = 16
 QueueLimit = 2500
 PageOffset = 50
 StartingPage = 0
