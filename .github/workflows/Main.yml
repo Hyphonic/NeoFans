@@ -81,9 +81,9 @@ jobs:
           rclone copy Data/Files Pixeldrain: --disable-http2 --multi-thread-streams 3 --transfers ${TRANSFERS} -v
           echo "🟢 Upload complete."
       
-      - name: 🔁 Trigger Next Workflow
-        if: success()
-        run: |
-          gh workflow run "Download Posts" --ref main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # - name: 🔁 Trigger Next Workflow
+      #   if: success()
+      #   run: |
+      #     gh workflow run "Download Posts" --ref main
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
