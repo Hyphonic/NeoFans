@@ -31,7 +31,7 @@ jobs:
           sudo apt-get update && sudo apt-get install cloudflare-warp
           warp-cli registration new
           warp-cli mode warp+doh
-          wrp-cli connect --accept-tos
+          warp-cli connect --accept-tos
           curl https://www.cloudflare.com/cdn-cgi/trace/
 
       - name: 📦 Set Up Python
