@@ -56,15 +56,15 @@ jobs:
         run: |
           python Fetcher.py
 
-      - name: 🔼 Commit LPD
-        if: success()
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git pull
-          git add Data/*.json
-          git commit -m "Update Data"
-          git push
+#      - name: 🔼 Commit LPD
+#        if: success()
+#        run: |
+#          git config user.name "GitHub Actions"
+#          git config user.email "actions@github.com"
+#          git pull
+#          git add Data/*.json
+#          git commit -m "Update Data"
+#          git push
 
       - name: 🌐 Upload Data with Rclone
         run: |
