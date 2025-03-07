@@ -51,6 +51,7 @@ jobs:
 
       - name: ⏬ Download All Content
         env:
+          COLUMNS: 120
           KEMONO_SESS: ${{ secrets.KEMONO_SESS }}
           COOMER_SESS: ${{ secrets.COOMER_SESS }}
         run: |
