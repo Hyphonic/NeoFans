@@ -198,38 +198,10 @@ class CreatorData:
     Platform: str
     Service: str
 
-@dataclass
-class PDF:
-    ID: Union[str, int]
-    Date: datetime
-
 class LowDiskSpace(Exception):
     pass
 
 Log.info('Rclone Is Installed' if rclone.is_installed() else 'Rclone Is Not Installed.')
-
-# Last Published Date Class
-class LPD:
-    @staticmethod
-    async def Load() -> list[PDF]:
-        try:
-            async with aiofiles.open(PublishedDateFile, 'r') as File:
-                Data = await File.read()
-                Dates = [PDF(**Item) for Item in orjson.loads(Data)]
-                Log.info(f'Loaded {len(Dates)} Published Dates')
-                return Dates
-        except FileNotFoundError:
-            return []
-    
-    @staticmethod    
-    async def Save(Data: list[PDF]) -> None:
-        async with aiofiles.open(PublishedDateFile, 'wb') as File:
-            JsonData = orjson.dumps([{
-                'ID': Item.ID,
-                'Date': Item.Date.isoformat()
-            } for Item in Data])
-            await File.write(JsonData)
-
 
 # Fetcher Class
 class Fetcher:
@@ -384,30 +356,26 @@ class Fetcher:
         await asyncio.gather(*Tasks)
         self.Log.debug(f'Fetched {Counter} Favorites')
 
-    async def Posts(self, Creator: CreatorData, LastPublishedDates: list[PDF]) -> None:
+    async def Posts(self, Creator: CreatorData) -> None:
         CurrentCounter = 0
         CurrentSkipped = 0
         Counter = 0
         SkippedCounter = 0
         Page = StartingPage
         QueueThreshold = self.DownloadQueue.maxsize * QueueThresholds[1]
-        LastPublishedDate = None
-        NewestSavedDate = None
-
-        for Date in LastPublishedDates:
-            if str(Date.ID) == str(Creator.ID):
-                LastPublishedDate = Date.Date
-                break
+        MinNewPostsThreshold = 10
 
         if self.Stopped:
             return
 
         @retry(**RetryConfig)
-        async def Fetch(Creator: CreatorData, CheckDateOnly: bool = False) -> bool:
-            nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped, NewestSavedDate
+        async def Fetch(Creator: CreatorData) -> bool:
+            nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped
             while not self.Stopped:
                 CurrentCounter = 0
                 CurrentSkipped = 0
+                NewPostsCount = 0
+                
                 if self.DownloadQueue.qsize() >= QueueThreshold:
                     self.Log.warning(f'Pausing Fetcher For {Creator.Name} - Queue At {self.DownloadQueue.qsize()}')
                     while self.DownloadQueue.qsize() > (QueueThreshold * QueueThresholds[0]):
@@ -423,22 +391,6 @@ class Fetcher:
                             Posts = orjson.loads(await Response.text())
                             if not Posts:
                                 return False
-
-                            Dates = []
-                            for Post in Posts:
-                                if Post.get('published'):
-                                    Dates.append(datetime.fromisoformat(Post['published']))
-                            
-                            if Dates and (not NewestSavedDate or max(Dates) > NewestSavedDate):
-                                NewestSavedDate = max(Dates)
-                            
-                            if CheckDateOnly and LastPublishedDate and Dates:
-                                if max(Dates) <= LastPublishedDate:
-                                    self.Log.info(f'Skipping {Creator.Name} - No New Posts Since {LastPublishedDate.isoformat()}')
-                                    return False
-                                else:
-                                    self.Log.info(f'Found Newer Posts For {Creator.Name} - {max(Dates).isoformat()} > {LastPublishedDate.isoformat()}')
-                                    return True
                             
                             for Post in Posts:
                                 if Post.get('file') and Post['file'].get('path'):
@@ -446,6 +398,7 @@ class Fetcher:
                                     CurrentCounter += 1
 
                                     if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
+                                        NewPostsCount += 1
                                         FileInfo = FileData(
                                             ID=Creator.ID,
                                             Name=Creator.Name,
@@ -472,6 +425,7 @@ class Fetcher:
                                         CurrentCounter += 1
 
                                         if not any(str(FilePath.stem).startswith(Hash) for Hash in self.Hashes):
+                                            NewPostsCount += 1
                                             FileInfo = FileData(
                                                 ID=Creator.ID,
                                                 Name=Creator.Name,
@@ -486,8 +440,14 @@ class Fetcher:
                                         else:
                                             SkippedCounter += 1
                                             CurrentSkipped += 1
-                            self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page} (Skipped: {CurrentSkipped})')
                             
+                            self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page} (New: {NewPostsCount}, Skipped: {CurrentSkipped})')
+                            
+                            # Stop fetching if we found fewer new posts than our threshold
+                            if NewPostsCount < MinNewPostsThreshold:
+                                self.Log.info(f'Stopping fetch for {Creator.Name} - Found only {NewPostsCount} new posts on page {Page}')
+                                return False
+                                
                             Page += 1
                             return True
                 except Exception as Error:
@@ -496,26 +456,9 @@ class Fetcher:
                     return False
                 return False
 
-        if LastPublishedDate:
-            if not await Fetch(Creator, True):
-                return
-            Page = StartingPage  # Reset page counter if we're continuing
-
         while not self.Stopped and await Fetch(Creator):
             pass
 
-        if not self.Stopped:
-            if NewestSavedDate:
-                DateFound = False
-                for Date in LastPublishedDates:
-                    if str(Date.ID) == str(Creator.ID):
-                        Date.Date = NewestSavedDate
-                        DateFound = True
-                        break
-                if not DateFound:
-                    LastPublishedDates.append(PDF(ID=Creator.ID, Date=NewestSavedDate))
-
-        await Fetch(Creator)
         if not self.Stopped:
             self.Log.info(f'Fetched {Counter} New Posts From {Creator.Name} After {Page} Pages (Skipped: {SkippedCounter})')
 
@@ -715,15 +658,6 @@ if __name__ == '__main__':
                 Log.info('Fetching Favorites...')
                 await Fetch.Favorites()
 
-                Log.info('Loading Published Dates...')
-                LastPublishedDates = await LPD.Load()
-
-                if LastPublishedDates:
-                    for Date in LastPublishedDates:
-                        Log.info(f'Loaded Published Date: {Date.ID} - {Date.Date}')
-                else:
-                    Log.info('No Published Dates Found')
-                
                 Log.info('Fetching Posts...')
                 AllCreators = []
                 for Platform in Fetch.Data:
@@ -735,12 +669,7 @@ if __name__ == '__main__':
                 for Creator in AllCreators:
                     if Fetch.Stopped:
                         break
-                    await Fetch.Posts(Creator, LastPublishedDates)
-                
-                Log.info('Saving Published Dates...')
-                await LPD.Save(LastPublishedDates)
-                
-                Download.TotalFiles = Fetch.TotalFiles
+                    await Fetch.Posts(Creator)
                 
             finally:
                 Log.info('Shutting Down Tasks...')
