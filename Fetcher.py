@@ -14,7 +14,6 @@ import orjson
 # Default Imports
 from dataclasses import dataclass
 from typing import Union, Tuple
-from datetime import datetime
 from asyncio import Queue
 from pathlib import Path
 import platform
@@ -271,7 +270,7 @@ class Fetcher:
 
     async def LookupHashes(self) -> None:
         ProcessedHashes = set()
-        NewSemaphoreLimit = max(min((SemaphoreLimit // 2), 2), 1)
+        NewSemaphoreLimit = max((SemaphoreLimit // 2), 1)
         Semaphore = asyncio.Semaphore(NewSemaphoreLimit)
         
         async def ProcessCreator(Directory: str, CreatorName: str) -> None:
@@ -326,7 +325,7 @@ class Fetcher:
     async def Favorites(self) -> None:
         Counter = 0
         Tasks = []
-        @retry(**RetryConfig)
+        #(**RetryConfig)
         async def Fetch(Platform: str, BaseUrl: str) -> None:
             nonlocal Counter
             try:
@@ -368,7 +367,7 @@ class Fetcher:
         if self.Stopped:
             return
 
-        @retry(**RetryConfig)
+        #@retry(**RetryConfig)
         async def Fetch(Creator: CreatorData) -> bool:
             nonlocal CurrentCounter, Counter, SkippedCounter, Page, CurrentSkipped
             while not self.Stopped:
@@ -445,7 +444,7 @@ class Fetcher:
                             
                             # Stop fetching if we found fewer new posts than our threshold
                             if NewPostsCount < MinNewPostsThreshold:
-                                self.Log.info(f'Stopping fetch for {Creator.Name} - Found only {NewPostsCount} new posts on page {Page}')
+                                self.Log.info(f'Stopping Fetch For {Creator.Name} - Found Only {NewPostsCount} New Posts On Page {Page}')
                                 return False
                                 
                             Page += 1
@@ -477,7 +476,7 @@ class Downloader:
         self.Hashes = Fetcher.Hashes
         self.InitialFreeSpace = shutil.disk_usage('.').free
 
-    @retry(**RetryConfig)
+    #@retry(**RetryConfig)
     async def FetchFile(self, Url: str, OutPath: Path) -> int:
         try:
             TotalSize = 0
