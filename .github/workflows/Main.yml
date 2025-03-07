@@ -32,6 +32,7 @@ jobs:
           sudo warp-cli --accept-tos registration new
           sudo warp-cli --accept-tos mode warp+doh
           sudo warp-cli --accept-tos connect
+          curl https://www.cloudflare.com/cdn-cgi/trace/
 
       - name: 📦 Set Up Python
         uses: actions/setup-python@v5.4.0
@@ -50,17 +51,10 @@ jobs:
 
       - name: ⏬ Download All Content
         env:
-          COLUMNS: 120
-          E621_LOGIN: ${{ secrets.E621_LOGIN }}
-          E621_API_KEY: ${{ secrets.E621_API_KEY }}
           KEMONO_SESS: ${{ secrets.KEMONO_SESS }}
           COOMER_SESS: ${{ secrets.COOMER_SESS }}
         run: |
           python Fetcher.py
-      
-      - name: 📃 List Files
-        run: |
-          cat Data/LPD.json
 
       - name: 🔼 Commit LPD
         if: success()
