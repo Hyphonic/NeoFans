@@ -32,7 +32,6 @@ jobs:
           sudo warp-cli --accept-tos registration new
           sudo warp-cli --accept-tos mode warp+doh
           sudo warp-cli --accept-tos connect
-          curl https://www.cloudflare.com/cdn-cgi/trace/
 
       - name: 📦 Set Up Python
         uses: actions/setup-python@v5.4.0
