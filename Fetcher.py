@@ -1,4 +1,3 @@
-
 # Main Imports - pip install -r requirements.txt
 # Rclone Installation - https://rclone.org/install/
 # Rclone Configuration - https://rclone.org/docs/
@@ -434,6 +433,11 @@ class Fetcher:
                                                 Extension=FilePath.suffix
                                             )
                                             self.Data[Creator.Platform]['Posts'][Creator.Service].append(FileInfo)
+                                            if self.DownloadQueue.full():
+                                                self.Log.warning(f'Download Queue Full ({self.DownloadQueue.qsize()})')
+                                                break
+                                            else:
+                                                await self.DownloadQueue.put(FileInfo)
                                             Counter += 1
                                             self.TotalFiles += 1
                                         else:
@@ -442,7 +446,6 @@ class Fetcher:
                             
                             self.Log.debug(f'Fetched {CurrentCounter} Posts From {Creator.Name} On Page {Page} (New: {NewPostsCount}, Skipped: {CurrentSkipped})')
                             
-                            # Stop fetching if we found fewer new posts than our threshold
                             if NewPostsCount < MinNewPostsThreshold:
                                 self.Log.info(f'Stopping Fetch For {Creator.Name} - Found Only {NewPostsCount} New Posts On Page {Page}')
                                 return False
