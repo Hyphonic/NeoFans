@@ -78,6 +78,6 @@ jobs:
       - name: 🔁 Trigger Next Workflow
         if: success()
         run: |
-      #     gh workflow run "Download Posts" --ref main
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh workflow run "Download Posts" --ref main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
