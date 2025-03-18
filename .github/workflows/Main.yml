@@ -76,7 +76,7 @@ jobs:
           echo "🟢 Upload complete."
       
       - name: 🔁 Trigger Next Workflow
-       if: success()
+        if: success()
         run: |
       #     gh workflow run "Download Posts" --ref main
       #   env:
